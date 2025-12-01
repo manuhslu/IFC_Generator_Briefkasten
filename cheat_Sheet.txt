@@ -1,0 +1,175 @@
+###############################################################
+# 🎓 HSLU DIGITAL CONSTRUCTION - PYTHON & GITHUB FULL GUIDE
+# Projekt: DT_Programmieren
+# Umgebung: myenv (oder .venv)
+# Autor: manuhslu
+###############################################################
+
+
+🔥 0️⃣  TÄGLICHER START (immer gleiche Routine)
+-----------------------------------------------
+# 📂 1. In Projektordner wechseln:
+> cd "C:\Users\<Name>\OneDrive - Hochschule Luzern\Programmieren\IFC_Generator_App"
+
+# ⚙️ 2. Umgebung aktivieren (je nach Terminal):
+# PowerShell:
+> .\.venv\Scripts\Activate.ps1
+# CMD:
+> .venv\Scripts\activate
+
+> deactivate
+
+# 🔍 3. Kontrolle:
+> where python
+> pip list
+
+# 🚀 4. Projekt starten (Beispiel Streamlit):
+> streamlit run main.py
+
+# ⏹️ 5. Beenden:
+> Ctrl + C
+
+# 💾 6. Änderungen sichern:
+> git add .
+> git commit -m "Update Projekt"
+> git push
+
+
+
+###############################################################
+# ⚙️ 1️⃣  EINMALIGE EINRICHTUNG DER UMGEBUNG
+###############################################################
+
+# 🧩 1. Neue virtuelle Umgebung erstellen:
+> python -m venv .venv
+# oder falls du myenv verwenden willst:
+> python -m venv myenv
+
+# 🚀 2. Aktivieren:
+> .\.venv\Scripts\Activate.ps1
+
+# 🧱 3. Wichtige Module installieren:
+> pip install streamlit pandas matplotlib ifcopenshell customtkinter
+
+# 💾 4. Aktuelle Module speichern (Freeze):
+> pip freeze > requirements.txt
+
+# 🧭 5. Kontrolle:
+> pip list
+> pip show streamlit
+
+# Öffne PowerShell und führe einmalig aus:
+
+> Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force
+
+# CurrentUser ändert nur für deinen Benutzer (kein Admin nötig).
+# RemoteSigned erlaubt lokale Skripte; aus dem Internet geladene Skripte benötigen Signatur.
+
+###############################################################
+# ☁️ 2️⃣  GITHUB ERSTVERBINDUNG (nur einmal nötig)
+###############################################################
+
+# 📦 1. Git initialisieren (falls nicht vorhanden):
+> git init
+
+# 🧭 2. GitHub-Repository verbinden:
+> git remote add origin https://github.com/<deinUser>/<deinRepo>.git
+
+# 🔍 3. Status prüfen:
+> git status
+
+# 🟩 4. Dateien hinzufügen:
+> git add .
+
+# 💬 5. Erstes Commit:
+> git commit -m "Initial Commit"
+
+# ☁️ 6. Hochladen:
+> git push -u origin main
+
+
+###############################################################
+# 🔁 3️⃣  GITHUB WORKFLOW IM ALLTAG
+###############################################################
+
+# 🔍 Änderungen prüfen:
+> git status
+
+# 🟩 Alles hinzufügen:
+> git add .
+
+# 💬 Commit erstellen:
+> git commit -m "Kurze Beschreibung"
+
+# ☁️ Änderungen hochladen:
+> git push
+
+# ⬇️ Neueste Version vom Server holen:
+> git pull origin main
+
+# ⚡ Schnellbefehl für Upload:
+> git add . && git commit -m "Auto-Upload" && git push
+
+
+###############################################################
+# 🧾 4️⃣  MODULE & REQUIREMENTS
+###############################################################
+
+# 📦 Modul installieren:
+> pip install rhino3dm
+
+# 🧾 Umgebung sichern:
+> pip freeze > requirements.txt
+
+# 🧩 Umgebung auf anderem Gerät wiederherstellen:
+> pip install -r requirements.txt
+
+# 🧹 Neue saubere Umgebung:
+> rmdir /s /q .venv
+> python -m venv .venv
+> .\.venv\Scripts\Activate.ps1
+> pip install -r requirements.txt
+
+
+###############################################################
+# 🖥️ 5️⃣  VISUELLE GIT STATUS-ANZEIGE IN VS CODE
+###############################################################
+
+# Farben im Explorer:
+# 🟩 Grün   → Neue Datei
+# 🟠 Orange → Geändert
+# ⚪ Weiß   → Unverändert
+# ⚫ Grau   → Ignoriert (z. B. .venv)
+
+# Buchstaben:
+# U = Untracked   (neu)
+# M = Modified    (geändert)
+# A = Added       (hinzugefügt)
+# D = Deleted     (gelöscht)
+
+# Vorgehen:
+# 1️⃣ Status prüfen
+# 2️⃣ git add .
+# 3️⃣ git commit -m "Beschreibung"
+# 4️⃣ git push
+
+
+###############################################################
+# 🧠 6️⃣  OPTIONAL – NÜTZLICHE BEFEHLE
+###############################################################
+
+# 🔍 Python-Version:
+> python --version
+
+# 🧭 Pfad prüfen:
+> where python
+
+# 📦 Paket aktualisieren:
+> pip install --upgrade <paketname>
+
+# 🔄 Abhängigkeiten aktualisieren:
+> pip install -r requirements.txt --upgrade
+
+# 🧹 Cache löschen (wenn Pip-Fehler auftreten):
+> pip cache purge
+###############################################################
