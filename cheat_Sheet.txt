@@ -1,175 +1,193 @@
 ###############################################################
-# 🎓 HSLU DIGITAL CONSTRUCTION - PYTHON & GITHUB FULL GUIDE
-# Projekt: DT_Programmieren
-# Umgebung: myenv (oder .venv)
-# Autor: manuhslu
+# 🎓 HSLU – PYTHON & GITHUB CHEAT SHEET (ALLGEMEIN & EINFACH)
 ###############################################################
 
 
 🔥 0️⃣  TÄGLICHER START (immer gleiche Routine)
 -----------------------------------------------
-# 📂 1. In Projektordner wechseln:
-> cd "C:\Users\<Name>\OneDrive - Hochschule Luzern\Programmieren\IFC_Generator_App"
+# 1. In Projektordner wechseln:
+> cd "C:\Pfad\zu\deinem\Projekt"
 
-# ⚙️ 2. Umgebung aktivieren (je nach Terminal):
-# PowerShell:
-> .\.venv\Scripts\Activate.ps1
-# CMD:
-> .venv\Scripts\activate
+# 2. Virtuelle Umgebung aktivieren:
+> .\.venv\Scripts\Activate.ps1        # PowerShell
+> .venv\Scripts\activate              # CMD
 
-> deactivate
-
-# 🔍 3. Kontrolle:
+# 3. Kontrolle:
 > where python
 > pip list
 
-# 🚀 4. Projekt starten (Beispiel Streamlit):
-> streamlit run main.py
+# 4. Projekt starten (z. B.):
+> python main.py
+> streamlit run app.py
 
-# ⏹️ 5. Beenden:
+# 5. Beenden:
 > Ctrl + C
 
-# 💾 6. Änderungen sichern:
+# 6. Änderungen sichern:
 > git add .
-> git commit -m "Update Projekt"
+> git commit -m "Update"
 > git push
 
 
 
 ###############################################################
-# ⚙️ 1️⃣  EINMALIGE EINRICHTUNG DER UMGEBUNG
+# ⚙️ 1️⃣  NEUES PYTHON-PROJEKT ERSTELLEN
 ###############################################################
 
-# 🧩 1. Neue virtuelle Umgebung erstellen:
-> python -m venv .venv
-# oder falls du myenv verwenden willst:
-> python -m venv myenv
+# 1. Projektordner anlegen
+> mkdir MeinProjekt
+> cd MeinProjekt
 
-# 🚀 2. Aktivieren:
+# 2. Virtuelle Umgebung erstellen
+> python -m venv .venv
+
+# 3. venv aktivieren
 > .\.venv\Scripts\Activate.ps1
 
-# 🧱 3. Wichtige Module installieren:
-> pip install streamlit pandas matplotlib ifcopenshell customtkinter
-
-# 💾 4. Aktuelle Module speichern (Freeze):
-> pip freeze > requirements.txt
-
-# 🧭 5. Kontrolle:
-> pip list
-> pip show streamlit
-
-# Öffne PowerShell und führe einmalig aus:
-
+# (Falls blockiert, nur einmal ausführen:)
 > Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force
 
-# CurrentUser ändert nur für deinen Benutzer (kein Admin nötig).
-# RemoteSigned erlaubt lokale Skripte; aus dem Internet geladene Skripte benötigen Signatur.
+# 4. Module installieren
+> pip install <paket>
+# Beispiel:
+> pip install streamlit ifcopenshell pandas
+
+# 5. Pakete sichern
+> pip freeze > requirements.txt
+
+
 
 ###############################################################
-# ☁️ 2️⃣  GITHUB ERSTVERBINDUNG (nur einmal nötig)
+# ☁️ 2️⃣  GITHUB VERBINDUNG – STANDARDVORGEHEN
 ###############################################################
 
-# 📦 1. Git initialisieren (falls nicht vorhanden):
+# 1. Git initialisieren
 > git init
 
-# 🧭 2. GitHub-Repository verbinden:
-> git remote add origin https://github.com/<deinUser>/<deinRepo>.git
+# 2. WICHTIG: .gitignore ERSTELLEN 
+# Datei ".gitignore" im Projektordner anlegen mit folgendem Inhalt:
 
-# 🔍 3. Status prüfen:
-> git status
+# ---- START .gitignore ----
+.venv/
+venv/
+env/
 
-# 🟩 4. Dateien hinzufügen:
+__pycache__/
+*.pyc
+*.pyo
+
+.vscode/
+
+models/
+*.ifc
+*.glb
+
+Thumbs.db
+Desktop.ini
+.DS_Store
+# ---- ENDE .gitignore ----
+
+# 3. Dateien hinzufügen
 > git add .
 
-# 💬 5. Erstes Commit:
-> git commit -m "Initial Commit"
+# 4. Erster Commit
+> git commit -m "Initial commit"
 
-# ☁️ 6. Hochladen:
+# 5. Remote setzen (dein GitHub-Repo)
+> git remote add origin https://github.com/<user>/<repo>.git
+
+# 6. Standardbranch setzen
+> git branch -M main
+
+# 7. Hochladen
 > git push -u origin main
+
 
 
 ###############################################################
 # 🔁 3️⃣  GITHUB WORKFLOW IM ALLTAG
 ###############################################################
 
-# 🔍 Änderungen prüfen:
+# Status prüfen
 > git status
 
-# 🟩 Alles hinzufügen:
+# Änderungen hinzufügen
 > git add .
 
-# 💬 Commit erstellen:
-> git commit -m "Kurze Beschreibung"
+# Commit erstellen
+> git commit -m "Beschreibung"
 
-# ☁️ Änderungen hochladen:
+# Hochladen
 > git push
 
-# ⬇️ Neueste Version vom Server holen:
+# Änderungen anderer holen
 > git pull origin main
 
-# ⚡ Schnellbefehl für Upload:
+# Schnellbefehl
 > git add . && git commit -m "Auto-Upload" && git push
+
 
 
 ###############################################################
 # 🧾 4️⃣  MODULE & REQUIREMENTS
 ###############################################################
 
-# 📦 Modul installieren:
-> pip install rhino3dm
+# Modul installieren
+> pip install <paket>
 
-# 🧾 Umgebung sichern:
+# Umgebung sichern
 > pip freeze > requirements.txt
 
-# 🧩 Umgebung auf anderem Gerät wiederherstellen:
+# Umgebung auf anderem Gerät rekonstruieren
+> python -m venv .venv
+> .\.venv\Scripts\Activate.ps1
 > pip install -r requirements.txt
 
-# 🧹 Neue saubere Umgebung:
+# Neue saubere Umgebung erzeugen
 > rmdir /s /q .venv
 > python -m venv .venv
 > .\.venv\Scripts\Activate.ps1
 > pip install -r requirements.txt
 
 
+
 ###############################################################
-# 🖥️ 5️⃣  VISUELLE GIT STATUS-ANZEIGE IN VS CODE
+# 🖥️ 5️⃣  GIT STATUS IN VS CODE
 ###############################################################
 
-# Farben im Explorer:
-# 🟩 Grün   → Neue Datei
-# 🟠 Orange → Geändert
-# ⚪ Weiß   → Unverändert
-# ⚫ Grau   → Ignoriert (z. B. .venv)
+# Grün   = neu
+# Orange = geändert
+# Grau   = ignoriert (.venv)
 
 # Buchstaben:
-# U = Untracked   (neu)
-# M = Modified    (geändert)
-# A = Added       (hinzugefügt)
-# D = Deleted     (gelöscht)
+# U = untracked
+# M = modified
+# A = added
+# D = deleted
 
-# Vorgehen:
-# 1️⃣ Status prüfen
-# 2️⃣ git add .
-# 3️⃣ git commit -m "Beschreibung"
-# 4️⃣ git push
+# Ablauf:
+# git add .
+# git commit -m "<Beschreibung>"
+# git push
+
 
 
 ###############################################################
-# 🧠 6️⃣  OPTIONAL – NÜTZLICHE BEFEHLE
+# 🧠 6️⃣  NÜTZLICHE BEFEHLE
 ###############################################################
 
-# 🔍 Python-Version:
+# Python-Version anzeigen
 > python --version
 
-# 🧭 Pfad prüfen:
+# Pfad des aktiven Python anzeigen
 > where python
 
-# 📦 Paket aktualisieren:
-> pip install --upgrade <paketname>
+# Paket aktualisieren
+> pip install --upgrade <paket>
 
-# 🔄 Abhängigkeiten aktualisieren:
+# Dependencies aktualisieren
 > pip install -r requirements.txt --upgrade
 
-# 🧹 Cache löschen (wenn Pip-Fehler auftreten):
+# Pip-Cache löschen (Fehlerbehebung)
 > pip cache purge
 ###############################################################
