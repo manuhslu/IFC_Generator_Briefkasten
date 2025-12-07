@@ -191,65 +191,45 @@ def make_mailbox_csg(f, dims):
     return final_csg
 
 
-def create_mailbox_product(f, context, storey, dims):
+def create_mailbox_product(f, context, storey, dims, placement_offset=(0.0, 0.0, 0.0)):
     csg = make_mailbox_csg(f, dims)
-
-    body_repr = f.create_entity(
-        "IfcShapeRepresentation",
-        context,
-        "Body",
-        "CSG",
-        [csg],
-    )
+    body_repr = f.create_entity("IfcShapeRepresentation", context, "Body", "CSG", [csg])
     prod_shape = f.create_entity("IfcProductDefinitionShape", None, None, [body_repr])
 
     local_placement = f.create_entity(
         "IfcLocalPlacement",
         storey.ObjectPlacement,
-        axis2placement3d(f, (0.0, 0.0, 0.0)),
+        axis2placement3d(f, placement_offset),
     )
 
-
     proxy = f.create_entity(
-    "IfcBuildingElementProxy",
-    GlobalId=ifcopenshell.guid.new(),
-    Name="Mailbox",
-    ObjectType="Briefkasten",
-    ObjectPlacement=local_placement,
-    Representation=prod_shape,
-)
-
-
-    # Place element into the storey via containment
-    f.create_entity(
-        "IfcRelContainedInSpatialStructure",
-        ifcopenshell.guid.new(),
-        None,
-        None,
-        None,
-        [proxy],
-        storey,
+        "IfcBuildingElementProxy",
+        GlobalId=ifcopenshell.guid.new(),
+        Name="Mailbox",
+        ObjectType="Briefkasten",
+        ObjectPlacement=local_placement,
+        Representation=prod_shape,
     )
     return proxy
 
 
 def validate_dims(d):
     # Enforce strictly positive for main body and door thickness
-    must_be_pos = ["width", "depth", "height", "door_thickness"]
+    must_be_pos = ["width", "depth", "height"]
     for k in must_be_pos:
         v = d[k]
         if not (isfinite(v) and v > 0):
-            raise ValueError(f"Ungültiges Maß für {k}: {v}")
+            raise ValueError(f"Ungültiges Mass für {k}: {v}")
     # Slot dimensions can be zero to disable the slot subtraction
-    slot_keys = ["slot_width", "slot_height", "slot_depth"]
-    for k in slot_keys:
-        v = d[k]
-        if not (isfinite(v) and v >= 0):
-            raise ValueError(f"Ungültiges Maß für {k}: {v}")
 
 
 def generate_mailbox_ifc(
-    width: float, depth: float, height: float, color: str
+    width: float,
+    depth: float,
+    height: float,
+    color: str,
+    rows: int = 1,
+    cols: int = 1,
 ) -> Optional[Path]:
     """
     Erzeugt eine temporäre IFC-Datei für einen Briefkasten und gibt den Pfad zurück.
@@ -270,27 +250,45 @@ def generate_mailbox_ifc(
         # 1. IFC-Datei im Speicher erstellen und Hierarchie aufbauen
         f = ifcopenshell.file(schema="IFC4")
         _, context, storey = create_project_hierarchy(f)
-
-        # 2. Produkt (Briefkasten-Geometrie) erstellen
-        element = create_mailbox_product(f, context, storey, dims)
-
-        # 3. Sichtbare Farbe für die 3D-Darstellung zuweisen (vereinfachter Weg)
+        
+        # 2. Sichtbare Farbe für die 3D-Darstellung vorbereiten
         def hex_to_rgb_floats(hex_color):
             hex_color = hex_color.lstrip("#")
             return tuple(int(hex_color[i:i+2], 16) / 255.0 for i in (0, 2, 4))
 
         r, g, b = hex_to_rgb_floats(color)
         rgb_color = f.create_entity("IfcColourRgb", None, r, g, b)
-        surface_style_rendering = f.create_entity("IfcSurfaceStyleRendering", SurfaceColour=rgb_color)
-        surface_style = f.create_entity("IfcSurfaceStyle", Name="MailboxColor", Side="BOTH", Styles=[surface_style_rendering])
-        
-        # Zuweisung des Stils zur Geometrie
-        shape_representation = element.Representation.Representations[0]
+        surface_style_rendering = f.create_entity(
+            "IfcSurfaceStyleRendering", SurfaceColour=rgb_color
+        )
+        surface_style = f.create_entity(
+            "IfcSurfaceStyle",
+            Name="MailboxColor",
+            Side="BOTH",
+            Styles=[surface_style_rendering],
+        )
 
-        # Wir erstellen das StyledItem. Es verknüpft sich automatisch mit der Geometrie.
-        # WICHTIG: Die Geometrie darf nicht aus der Liste entfernt werden!
-        f.create_entity("IfcStyledItem", Item=shape_representation.Items[0], Styles=[surface_style])
-        # 4. IFC-Datei in ein temporäres Verzeichnis schreiben
+        # 3. Produkte (Briefkasten-Geometrien) in einem Raster erstellen
+        proxies = []
+        for r_idx in range(rows):
+            for c_idx in range(cols):
+                offset = (c_idx * width, 0.0, r_idx * height)
+                proxy = create_mailbox_product(
+                    f, context, storey, dims, placement_offset=offset
+                )
+
+                # Stil auf die Geometrie des Proxys anwenden
+                shape_representation = proxy.Representation.Representations[0]
+                f.create_entity(
+                    "IfcStyledItem", Item=shape_representation.Items[0], Styles=[surface_style]
+                )
+
+                proxies.append(proxy)
+
+        # 4. Alle erstellten Elemente dem Geschoss zuordnen
+        f.create_entity("IfcRelContainedInSpatialStructure", ifcopenshell.guid.new(), None, None, None, proxies, storey)
+        
+        # 5. IFC-Datei in ein temporäres Verzeichnis schreiben
         temp_dir = Path(tempfile.gettempdir())
         out_path = temp_dir / f"{ifcopenshell.guid.new()}.ifc"
         f.write(str(out_path))
