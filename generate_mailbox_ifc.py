@@ -286,11 +286,10 @@ def generate_mailbox_ifc(
         
         # Zuweisung des Stils zur Geometrie
         shape_representation = element.Representation.Representations[0]
-        styled_item = f.create_entity("IfcStyledItem", Item=shape_representation.Items[0], Styles=[surface_style])
-        
-        # Ersetze das 'Item' in der Shape Representation durch das 'StyledItem'
-        shape_representation.Items = [styled_item]
 
+        # Wir erstellen das StyledItem. Es verknüpft sich automatisch mit der Geometrie.
+        # WICHTIG: Die Geometrie darf nicht aus der Liste entfernt werden!
+        f.create_entity("IfcStyledItem", Item=shape_representation.Items[0], Styles=[surface_style])
         # 4. IFC-Datei in ein temporäres Verzeichnis schreiben
         temp_dir = Path(tempfile.gettempdir())
         out_path = temp_dir / f"{ifcopenshell.guid.new()}.ifc"
