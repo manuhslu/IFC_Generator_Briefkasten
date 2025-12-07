@@ -10,37 +10,28 @@ RAL_COLORS = {
     "RAL 3000 - Feuerrot": "#BF242A",
 }
 
-def color_selector():
+def color_selector(default_color_hex: str) -> str:
     """
-    Zeigt eine klickbare Auswahl von RAL-Farben an und gibt den gewählten Hex-Code zurück.
-    
-    Verwendet HTML und CSS in st.markdown, um farbige Quadrate als Buttons darzustellen.
-    Die Auswahl wird über st.radio im Hintergrund gesteuert.
+    Zeigt eine Auswahl von RAL-Farben mit st.radio an und gibt den gewählten Hex-Code zurück.
+    Der Zustand wird korrekt über den `default_color_hex` Parameter verwaltet.
     """
     st.subheader("🎨 Farbauswahl")
 
-    # Erstelle eine visuelle Darstellung mit HTML/CSS
-    color_html = ""
-    for name, hex_code in RAL_COLORS.items():
-        color_html += f"""
-        <div style="display: inline-block; margin: 5px; text-align: center;">
-            <div style="width: 50px; height: 50px; background-color: {hex_code}; border: 1px solid #ccc; border-radius: 5px;"></div>
-            <small style="display: block; margin-top: 5px;">{name.split(' - ')[0]}</small>
-        </div>
-        """
-    
-    # Unsichtbares Radio-Button-Set zur Steuerung der Auswahl
+    # Finde den Index der aktuell ausgewählten Farbe für die korrekte Vorauswahl.
+    # Falls die Farbe nicht gefunden wird, nimm den ersten Eintrag als Fallback.
+    color_names = list(RAL_COLORS.keys())
+    color_values = list(RAL_COLORS.values())
+    try:
+        default_index = color_values.index(default_color_hex)
+    except ValueError:
+        default_index = 0
+
     selected_color_name = st.radio(
         "Wähle eine Farbe",
-        options=list(RAL_COLORS.keys()),
-        index=1,  # Standardauswahl ist Weissaluminium
-        label_visibility="collapsed", # Versteckt das Label "Wähle eine Farbe"
-        format_func=lambda name: name.split(' - ')[1] # Zeigt nur den Farbnamen an
+        options=color_names,
+        index=default_index,
+        label_visibility="collapsed"
     )
-
-    # Zeige die visuellen Farb-Boxen an
-    st.markdown(f"<div style='display: flex; flex-wrap: wrap;'>{color_html}</div>", unsafe_allow_html=True)
-    st.markdown("---") # Trennlinie
 
     # Gib den Hex-Code der ausgewählten Farbe zurück
     return RAL_COLORS[selected_color_name]

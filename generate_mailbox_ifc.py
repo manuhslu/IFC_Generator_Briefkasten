@@ -1,8 +1,11 @@
-import argparse
 from math import isfinite
+import tempfile
+from pathlib import Path
+from typing import Optional
 
 import ifcopenshell
 
+# --- IFC Geometrie- und Struktur-Hilfsfunktionen ---
 
 def _listf(vals):
     return [float(x) for x in vals]
@@ -245,11 +248,13 @@ def validate_dims(d):
             raise ValueError(f"Ungültiges Maß für {k}: {v}")
 
 
-def generate_mailbox_ifc(width, depth, height, color="#aaaaaa", out_path="models/output/briefkasten.ifc"):
-    """Erzeugt eine IFC-Datei für einen Briefkasten inklusive Farbe in einem einzigen, effizienten Schritt."""
-    import os
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-
+def generate_mailbox_ifc(
+    width: float, depth: float, height: float, color: str
+) -> Optional[Path]:
+    """
+    Erzeugt eine temporäre IFC-Datei für einen Briefkasten und gibt den Pfad zurück.
+    Die Farbe wird direkt der Geometrie zugewiesen.
+    """
     dims = {
         "width": width,
         "depth": depth,
@@ -259,55 +264,47 @@ def generate_mailbox_ifc(width, depth, height, color="#aaaaaa", out_path="models
         "slot_height": 0.03,
         "slot_depth": 0.02,
     }
-    validate_dims(dims)
+    try:
+        validate_dims(dims)
 
-    # 1. IFC-Datei im Speicher erstellen und Hierarchie aufbauen
-    f = ifcopenshell.file(schema="IFC4")
-    _, context, storey = create_project_hierarchy(f)
+        # 1. IFC-Datei im Speicher erstellen und Hierarchie aufbauen
+        f = ifcopenshell.file(schema="IFC4")
+        _, context, storey = create_project_hierarchy(f)
 
-    # 2. Produkt (Briefkasten-Geometrie) erstellen und Referenz zum Element erhalten
-    element = create_mailbox_product(f, context, storey, dims)
+        # 2. Produkt (Briefkasten-Geometrie) erstellen
+        element = create_mailbox_product(f, context, storey, dims)
 
-    # 3. Farbe als PropertySet für Daten-Zwecke speichern
-    pset = f.create_entity("IfcPropertySet", GlobalId=ifcopenshell.guid.new(), Name="Pset_Briefkasten")
-    prop_color = f.create_entity(
-        "IfcPropertySingleValue",
-        Name="Color",
-        NominalValue=f.create_entity("IfcLabel", color)
-    )
-    pset.HasProperties = [prop_color]
-    f.create_entity(
-        "IfcRelDefinesByProperties", GlobalId=ifcopenshell.guid.new(),
-        RelatingPropertyDefinition=pset,
-        RelatedObjects=[element]
-    )
+        # 3. Sichtbare Farbe für die 3D-Darstellung zuweisen (vereinfachter Weg)
+        def hex_to_rgb_floats(hex_color):
+            hex_color = hex_color.lstrip("#")
+            return tuple(int(hex_color[i:i+2], 16) / 255.0 for i in (0, 2, 4))
 
-    # 4. Sichtbare Farbe für die 3D-Darstellung zuweisen
-    def hex_to_rgb_floats(hex_color):
-        hex_color = hex_color.lstrip("#")
-        return tuple(int(hex_color[i:i+2], 16)/255.0 for i in (0, 2, 4))
+        r, g, b = hex_to_rgb_floats(color)
+        rgb_color = f.create_entity("IfcColourRgb", None, r, g, b)
+        surface_style_rendering = f.create_entity("IfcSurfaceStyleRendering", SurfaceColour=rgb_color)
+        surface_style = f.create_entity("IfcSurfaceStyle", Name="MailboxColor", Side="BOTH", Styles=[surface_style_rendering])
+        
+        # Zuweisung des Stils zur Geometrie
+        shape_representation = element.Representation.Representations[0]
+        styled_item = f.create_entity("IfcStyledItem", Item=shape_representation.Items[0], Styles=[surface_style])
+        
+        # Ersetze das 'Item' in der Shape Representation durch das 'StyledItem'
+        shape_representation.Items = [styled_item]
 
-    r, g, b = hex_to_rgb_floats(color)
-    rgb = f.create_entity("IfcColourRgb", None, r, g, b)
-    rendering = f.create_entity("IfcSurfaceStyleRendering",
-                                SurfaceColour=rgb,
-                                ReflectanceMethod="NOTDEFINED")
-    surface = f.create_entity("IfcSurfaceStyle", Name="MailboxColor", Styles=[rendering])
-    style_assign = f.create_entity("IfcPresentationStyleAssignment", Styles=[surface])
-
-    # Stil direkt der Shape Representation des erstellten Elements zuweisen
-    shape_representation = element.Representation.Representations[0]
-    f.create_entity("IfcStyledItem", Item=shape_representation.Items[0], Styles=[style_assign])
-
-    # 5. IFC-Datei einmalig auf die Festplatte schreiben
-    f.write(out_path)
-    print(f"🎨 IFC-Modell mit Farbe {color} generiert und in {out_path} gespeichert.")
-    return out_path
-
+        # 4. IFC-Datei in ein temporäres Verzeichnis schreiben
+        temp_dir = Path(tempfile.gettempdir())
+        out_path = temp_dir / f"{ifcopenshell.guid.new()}.ifc"
+        f.write(str(out_path))
+        
+        return out_path
+    except Exception as e:
+        print(f"Fehler bei der IFC-Generierung: {e}")
+        return None
 
 
 if __name__ == "__main__":
     # Dieser Block dient zum direkten Testen des Skripts
     print("Generiere Test-Briefkasten...")
-    generate_mailbox_ifc(width=0.4, depth=0.25, height=0.5, color="#aaaaaa", out_path="models/briefkasten.ifc")
-    print("Test-Briefkasten erfolgreich erstellt: models/briefkasten.ifc")
+    test_path = generate_mailbox_ifc(width=0.4, depth=0.25, height=0.5, color="#BF242A")
+    if test_path:
+        print(f"Test-Briefkasten erfolgreich erstellt: {test_path}")

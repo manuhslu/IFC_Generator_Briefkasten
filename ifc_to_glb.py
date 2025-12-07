@@ -1,15 +1,14 @@
 import multiprocessing
+import os
+from pathlib import Path
+
 import ifcopenshell
 import ifcopenshell.geom
-import os
 
-def convert_ifc_to_glb(ifc_path, glb_path):
+
+def convert_ifc_to_glb(ifc_path: Path, glb_path: Path):
     # IFC-Datei laden
-    if not os.path.exists(ifc_path):
-        raise FileNotFoundError(f"❌ IFC-Datei nicht gefunden: {ifc_path}")
-
-    print(f"📂 Öffne IFC-Datei: {ifc_path}")
-    ifc_file = ifcopenshell.open(ifc_path)
+    ifc_file = ifcopenshell.open(str(ifc_path))
 
     # Geometrie- und Serialisierungs-Settings
     settings = ifcopenshell.geom.settings()
@@ -27,38 +26,34 @@ def convert_ifc_to_glb(ifc_path, glb_path):
     serialiser_settings = ifcopenshell.geom.serializer_settings()
     serialiser_settings.set("use-element-guids", True)
 
-    os.makedirs(os.path.dirname(glb_path), exist_ok=True)
-    serialiser = ifcopenshell.geom.serializers.gltf(glb_path, settings, serialiser_settings)
+    serialiser = ifcopenshell.geom.serializers.gltf(str(glb_path), settings, serialiser_settings)
 
     serialiser.setFile(ifc_file)
     serialiser.setUnitNameAndMagnitude("METER", 1.0)
     serialiser.writeHeader()
 
     # Iterator initialisieren (mehrkernig)
-    iterator = ifcopenshell.geom.iterator(settings, ifc_file, multiprocessing.cpu_count())
+    iterator = ifcopenshell.geom.iterator(settings, ifc_file, multiprocessing.cpu_count() - 1 or 1)
 
-    print("🔄 Konvertiere Geometrie...")
     if iterator.initialize():
         while True:
             shape = iterator.get()
             serialiser.write(shape)
             if not iterator.next():
                 break
-
     serialiser.finalize()
-    print(f"✅ GLB-Datei erfolgreich erstellt: {glb_path}")
 
 
 if __name__ == "__main__":
-    # Eingabe: IFC-Datei und Ausgabepfad für GLB
-    input_ifc = os.path.join("models", "tisch.ifc")
-    output_glb = os.path.join("models", "tisch.glb")
-
-    convert_ifc_to_glb(input_ifc, output_glb)
-
-if __name__ == "__main__":
-    # Eingabe: IFC-Datei und Ausgabepfad für GLB
-    input_ifc = os.path.join("models", "briefkasten.ifc")
-    output_glb = os.path.join("models", "briefkasten.glb")
-
-    convert_ifc_to_glb(input_ifc, output_glb)
+    # Dieser Block dient zum direkten Testen des Skripts
+    # Erstelle eine Dummy-IFC-Datei zum Testen
+    from generate_mailbox_ifc import generate_mailbox_ifc
+    print("Teste Konvertierung...")
+    test_ifc_path = generate_mailbox_ifc(width=0.4, depth=0.2, height=0.5, color="#004E8A")
+    if test_ifc_path:
+        test_glb_path = test_ifc_path.with_suffix(".glb")
+        convert_ifc_to_glb(test_ifc_path, test_glb_path)
+        print(f"✅ Konvertierung erfolgreich: {test_glb_path}")
+        # Aufräumen
+        test_ifc_path.unlink()
+        test_glb_path.unlink()
