@@ -33,8 +33,7 @@ def convert_ifc_to_glb(ifc_path: Path, glb_path: Path):
     serialiser.writeHeader()
 
     # Iterator initialisieren (mehrkernig)
-    iterator = ifcopenshell.geom.iterator(settings, ifc_file, multiprocessing.cpu_count() - 1 or 1)
-
+    iterator = ifcopenshell.geom.iterator(settings, ifc_file, 1)
     if iterator.initialize():
         while True:
             shape = iterator.get()
