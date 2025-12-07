@@ -1,6 +1,7 @@
 import streamlit as st
 import base64
 
+from pathlib import Path
 from generate_mailbox_ifc import generate_mailbox_ifc
 from ifc_to_glb import convert_ifc_to_glb
 from ui_components import color_selector
@@ -12,13 +13,14 @@ st.title("📬 Parametrischer Briefkasten-Konfigurator")
 col1, col2 = st.columns([2, 1])
 
 @st.cache_data
-def generate_and_convert_model(width, height, depth, color):
+def generate_and_convert_model(width, height, depth, color, cache_key=None):
     """
     Generiert ein IFC-Modell, konvertiert es nach GLB und gibt die GLB-Daten als Bytes zurück.
     Streamlit's Caching verhindert die Neugenerierung bei gleichen Parametern.
+    Der cache_key ist ein Dummy-Parameter, um das Caching bei Bedarf zu umgehen.
     """
-    st.info("Generiere neues Modell...")
-    ifc_path = generate_mailbox_ifc(width=width, height=height, depth=depth, color_hex=color)
+    st.info("Generiere 3D-Modell...")
+    ifc_path = generate_mailbox_ifc(width=width, height=height, depth=depth, color=color)
     if ifc_path:
         glb_path = convert_ifc_to_glb(ifc_path)
         if glb_path and glb_path.exists():
@@ -28,28 +30,66 @@ def generate_and_convert_model(width, height, depth, color):
     return None
 
 
+# --- Session State Initialisierung ---
+if 'step' not in st.session_state:
+    st.session_state.step = "size"
+    st.session_state.breite = 0.4
+    st.session_state.hoehe = 0.3
+    st.session_state.tiefe = 0.15
+    st.session_state.farbe = "#aaaaaa" # Standardfarbe
+
+
 # ---------- RECHTS: Eingaben ----------
 with col2:
     st.subheader("⚙️ Eingabeparameter")
 
-    breite = st.slider("Breite [m]", 0.2, 1.0, 0.4, 0.05)
-    hoehe = st.slider("Höhe [m]", 0.2, 1.0, 0.3, 0.05)
-    tiefe = st.slider("Tiefe [m]", 0.1, 0.5, 0.15, 0.05)
-    st.markdown("---") # Visuelle Trennlinie
+    # Schritt 1: Grösse definieren
+    if st.session_state.step == "size":
+        st.session_state.breite = st.slider("Breite [m]", 0.2, 1.0, st.session_state.breite, 0.05)
+        st.session_state.hoehe = st.slider("Höhe [m]", 0.2, 1.0, st.session_state.hoehe, 0.05)
+        st.session_state.tiefe = st.slider("Tiefe [m]", 0.1, 0.5, st.session_state.tiefe, 0.05)
+        st.markdown("---")
 
-    # Verwende den neuen, benutzerdefinierten Farbwähler
-    farbe = color_selector()
+        if st.button("Grösse bestätigen & Farbe wählen", type="primary"):
+            st.session_state.step = "color"
+            st.rerun()
+
+    # Schritt 2: Farbe wählen
+    elif st.session_state.step == "color":
+        st.markdown(
+            f"""
+            **Gewählte Dimensionen:**
+            - **Breite:** `{st.session_state.breite:.2f} m`
+            - **Höhe:** `{st.session_state.hoehe:.2f} m`
+            - **Tiefe:** `{st.session_state.tiefe:.2f} m`
+            """
+        )
+        st.markdown("---")
+        st.session_state.farbe = color_selector(st.session_state.farbe)
+        st.markdown("---")
+
+        if st.button("Grösse erneut anpassen"):
+            st.session_state.step = "size"
+            st.rerun()
+
 
 # ---------- LINKS: Viewer ----------
 with col1:
     st.subheader("3D-Ansicht")
 
     # Generiere das Modell basierend auf den Eingaben
-    glb_bytes = generate_and_convert_model(breite, hoehe, tiefe, farbe)
+    # Der cache_key stellt sicher, dass das Modell neu generiert wird, wenn sich der Schritt ändert
+    glb_bytes = generate_and_convert_model( # type: ignore
+        st.session_state.breite, st.session_state.hoehe, st.session_state.tiefe, st.session_state.farbe, cache_key=st.session_state.step
+    )
 
     if glb_bytes:
         b64 = base64.b64encode(glb_bytes).decode("ascii")
         data_url = f"data:model/gltf-binary;base64,{b64}"
+
+        # Erzeuge einen eindeutigen Key, um das Neuladen des Viewers zu erzwingen,
+        # wenn sich die Farbe oder die Grösse ändert.
+        model_key = f"{st.session_state.breite}-{st.session_state.hoehe}-{st.session_state.tiefe}-{st.session_state.farbe}"
 
         viewer_html = f"""
             <model-viewer
@@ -71,6 +111,6 @@ with col1:
             </script>
         """
 
-        st.components.v1.html(viewer_html, height=620)
+        st.components.v1.html(viewer_html, height=620, key=model_key)
     else:
         st.warning("Kein Modell zum Anzeigen vorhanden. Bitte Parameter prüfen.")

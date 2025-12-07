@@ -245,43 +245,8 @@ def validate_dims(d):
             raise ValueError(f"Ungültiges Maß für {k}: {v}")
 
 
-def build_ifc_mailbox(out_path, dims):
-    f = ifcopenshell.file(schema="IFC4")
-    _, context, storey = create_project_hierarchy(f)
-    create_mailbox_product(f, context, storey, dims)
-    f.write(out_path)
-
-
-def parse_args():
-    p = argparse.ArgumentParser(description="Generate a minimal IFC mailbox (body, door, slot)")
-    p.add_argument("--out", required=True, help="Output IFC file path")
-    p.add_argument("--width", type=float, default=0.40, help="Body width (X, m)")
-    p.add_argument("--depth", type=float, default=0.25, help="Body depth (Y, m)")
-    p.add_argument("--height", type=float, default=0.50, help="Body height (Z, m)")
-    p.add_argument("--door-thickness", type=float, default=0.005, help="Door thickness (Y, m)")
-    p.add_argument("--slot-width", type=float, default=0.30, help="Slot width (X, m)")
-    p.add_argument("--slot-height", type=float, default=0.03, help="Slot height (Z, m)")
-    p.add_argument("--slot-depth", type=float, default=0.02, help="Slot depth (Y, m)")
-    return p.parse_args()
-
-
-def main():
-    args = parse_args()
-    dims = {
-        "width": args.width,
-        "depth": args.depth,
-        "height": args.height,
-        "door_thickness": args.door_thickness,
-        "slot_width": args.slot_width,
-        "slot_height": args.slot_height,
-        "slot_depth": args.slot_depth,
-    }
-    validate_dims(dims)
-    build_ifc_mailbox(args.out, dims)
-    print(f"IFC Mailbox geschrieben: {args.out}")
-
 def generate_mailbox_ifc(width, depth, height, color="#aaaaaa", out_path="models/output/briefkasten.ifc"):
-    """Erzeugt eine IFC-Datei mit Farb-Property und sichtbarer Farbe"""
+    """Erzeugt eine IFC-Datei für einen Briefkasten inklusive Farbe in einem einzigen, effizienten Schritt."""
     import os
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
@@ -295,23 +260,29 @@ def generate_mailbox_ifc(width, depth, height, color="#aaaaaa", out_path="models
         "slot_depth": 0.02,
     }
     validate_dims(dims)
-    build_ifc_mailbox(out_path, dims)
 
-    # Farbe als PropertySet speichern
-    f = ifcopenshell.open(out_path)
-    element = next(e for e in f.by_type("IfcBuildingElementProxy"))
-    pset = f.create_entity("IfcPropertySet", Name="Pset_Briefkasten")
+    # 1. IFC-Datei im Speicher erstellen und Hierarchie aufbauen
+    f = ifcopenshell.file(schema="IFC4")
+    _, context, storey = create_project_hierarchy(f)
+
+    # 2. Produkt (Briefkasten-Geometrie) erstellen und Referenz zum Element erhalten
+    element = create_mailbox_product(f, context, storey, dims)
+
+    # 3. Farbe als PropertySet für Daten-Zwecke speichern
+    pset = f.create_entity("IfcPropertySet", GlobalId=ifcopenshell.guid.new(), Name="Pset_Briefkasten")
     prop_color = f.create_entity(
         "IfcPropertySingleValue",
         Name="Color",
         NominalValue=f.create_entity("IfcLabel", color)
     )
     pset.HasProperties = [prop_color]
-    f.create_entity("IfcRelDefinesByProperties",
-                    RelatingPropertyDefinition=pset,
-                    RelatedObjects=[element])
+    f.create_entity(
+        "IfcRelDefinesByProperties", GlobalId=ifcopenshell.guid.new(),
+        RelatingPropertyDefinition=pset,
+        RelatedObjects=[element]
+    )
 
-    # --- Sichtbare Farbe ---
+    # 4. Sichtbare Farbe für die 3D-Darstellung zuweisen
     def hex_to_rgb_floats(hex_color):
         hex_color = hex_color.lstrip("#")
         return tuple(int(hex_color[i:i+2], 16)/255.0 for i in (0, 2, 4))
@@ -323,13 +294,20 @@ def generate_mailbox_ifc(width, depth, height, color="#aaaaaa", out_path="models
                                 ReflectanceMethod="NOTDEFINED")
     surface = f.create_entity("IfcSurfaceStyle", Name="MailboxColor", Styles=[rendering])
     style_assign = f.create_entity("IfcPresentationStyleAssignment", Styles=[surface])
-    shape = next(e for e in f.by_type("IfcShapeRepresentation"))
-    f.create_entity("IfcStyledItem", Item=shape.Items[0], Styles=[style_assign])
+
+    # Stil direkt der Shape Representation des erstellten Elements zuweisen
+    shape_representation = element.Representation.Representations[0]
+    f.create_entity("IfcStyledItem", Item=shape_representation.Items[0], Styles=[style_assign])
+
+    # 5. IFC-Datei einmalig auf die Festplatte schreiben
     f.write(out_path)
-    print(f"🎨 Farbe {color} angewendet (RGB={r:.2f},{g:.2f},{b:.2f})")
+    print(f"🎨 IFC-Modell mit Farbe {color} generiert und in {out_path} gespeichert.")
+    return out_path
 
 
 
 if __name__ == "__main__":
-    generate_mailbox_ifc(width=0.4, depth=0.25, height=0.5, color="#aaaaaa", out_path="models/briefkasten.ifc")    
-
+    # Dieser Block dient zum direkten Testen des Skripts
+    print("Generiere Test-Briefkasten...")
+    generate_mailbox_ifc(width=0.4, depth=0.25, height=0.5, color="#aaaaaa", out_path="models/briefkasten.ifc")
+    print("Test-Briefkasten erfolgreich erstellt: models/briefkasten.ifc")
