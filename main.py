@@ -4,29 +4,29 @@ from typing import Optional, Tuple
 
 from datetime import datetime
 from pathlib import Path
-from generate_mailbox_ifc import generate_mailbox_ifc
+from generate_mailbox_v2 import generate_mailbox_ifc, BASE_WIDTH, BASE_HEIGHT, FRAME_DEPTH_DEFAULT
 from ifc_to_glb import convert_ifc_to_glb
 from ui_components import color_selector
 
 st.set_page_config(page_title="Briefkasten-Konfigurator", layout="wide")
 st.title("📬 Parametrischer Briefkasten-Konfigurator")
 
-# --- Konstanten für Standardwerte ---
-DEFAULT_BREITE = 0.4
-DEFAULT_HOEHE = 0.3
-DEFAULT_TIEFE = 0.15
-DEFAULT_FARBE = "#A1A1A0" # RAL 9006 - Weissaluminium
+# --- Konstanten für Standardwerte (aus generate_mailbox_v2) ---
+DEFAULT_BREITE = BASE_WIDTH
+DEFAULT_HOEHE = BASE_HEIGHT
+DEFAULT_TIEFE = FRAME_DEPTH_DEFAULT
+DEFAULT_FARBE = "#C0C0C0"  # Farblos eloxiert / Grau
 
-@st.cache_data
+@st.cache_data(show_spinner=False)
 def generate_and_convert_model(
-    width: float, height: float, depth: float, color: str, rows: int, cols: int
+    width: float, height: float, depth: float, color: str, rows: int, columns: int
 ) -> Optional[Tuple[bytes, bytes]]:
     """
     Generiert ein IFC-Modell, konvertiert es nach GLB und gibt die GLB- und IFC-Daten als Bytes zurück.
     Streamlit's Caching verhindert die Neugenerierung bei gleichen Parametern.
     """
     ifc_path = generate_mailbox_ifc(
-        width=width, height=height, depth=depth, color=color, rows=rows, cols=cols
+        width=width, height=height, depth=depth, color=color, rows=rows, columns=columns
     )
     if not ifc_path:
         st.error("IFC-Datei konnte nicht erstellt werden.")
@@ -98,7 +98,7 @@ if 'step' not in st.session_state:
     st.session_state.tiefe = DEFAULT_TIEFE
     st.session_state.farbe = DEFAULT_FARBE
     st.session_state.rows = 1
-    st.session_state.cols = 1
+    st.session_state.columns = 1
 
 # --- Zentrale Modellgenerierung ---
 # Das Modell wird immer basierend auf dem aktuellen session_state generiert.
@@ -112,7 +112,7 @@ with st.spinner("Aktualisiere Modell..."):
         st.session_state.tiefe,
         st.session_state.farbe,
         st.session_state.rows,
-        st.session_state.cols,
+        st.session_state.columns,
     )
     if model_data:
         glb_bytes, ifc_bytes = model_data
@@ -138,8 +138,8 @@ with col2:
         st.session_state.tiefe = st.slider("Tiefe [m]", 0.1, 0.5, st.session_state.tiefe, 0.05)
         
         st.subheader("Anordnung")
-        st.session_state.cols = st.number_input("Anzahl Spalten", min_value=1, max_value=5, value=st.session_state.cols, step=1)
-        st.session_state.rows = st.number_input("Anzahl Zeilen", min_value=1, max_value=5, value=st.session_state.rows, step=1)
+        st.session_state.columns = st.number_input("Anzahl Spalten", min_value=1, max_value=5, value=st.session_state.columns, step=1)
+        st.session_state.rows = st.number_input("Anzahl Zeilen", min_value=1, max_value=3, value=st.session_state.rows, step=1)
         
         st.markdown("---")
 
@@ -164,7 +164,7 @@ with col2:
             f"""
             **Ihre Konfiguration:**
             - **Grösse (B/H/T):** `{st.session_state.breite:.2f} m` / `{st.session_state.hoehe:.2f} m` / `{st.session_state.tiefe:.2f} m`
-            - **Anordnung:** `{st.session_state.rows}` Zeile(n), `{st.session_state.cols}` Spalte(n)
+            - **Anordnung:** `{st.session_state.rows}` Zeile(n), `{st.session_state.columns}` Spalte(n)
             """
         )
         st.markdown("---")

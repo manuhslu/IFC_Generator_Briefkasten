@@ -2,20 +2,24 @@ import streamlit as st
 
 # Definition der verfügbaren RAL-Farben mit ihren Hex-Codes
 RAL_COLORS = {
-    "RAL 9011 - Graphitschwarz": "#1C1C1E",
-    "RAL 9006 - Weissaluminium": "#A1A1A0",
-    "RAL 9016 - Verkehrsweiss": "#F1F1F1",
-    "RAL 5005 - Signalblau": "#004E8A",
-    "RAL 3000 - Feuerrot": "#BF242A",
+    "Farblos eloxiert": "#C0C0C0",
+    "RAL 9011 - Graphitschwarz": "#292C2F",
+    "RAL 9016 - Verkehrsweiss": "#F7FBF5",
+    "RAL 7016 - Anthrazitgrau": "#383E42",
+    "RAL 7037 - Staubgrau": "#7A7B7A",
+    "RAL 5005 - Signalblau": "#005387",
+    "RAL 3000 - Feuerrot": "#A72920",
     "RAL 1004 - Goldgelb": "#E2B007",
-    "RAL 6010 - Grasgrün": "#49733F",
+    "RAL 6010 - Grasgrün": "#4D6F39",
 }
 
 # Zuordnung von Farbnamen zu Emojis für eine visuelle Darstellung
 COLOR_EMOJIS = {
+    "Farblos eloxiert": "⬜",
     "RAL 9011 - Graphitschwarz": "⬛",
-    "RAL 9006 - Weissaluminium": "⬜",
     "RAL 9016 - Verkehrsweiss": "⬜",
+    "RAL 7016 - Anthrazitgrau": "⬛",
+    "RAL 7037 - Staubgrau": "⬛",
     "RAL 5005 - Signalblau": "🟦",
     "RAL 3000 - Feuerrot": "🟥",
     "RAL 1004 - Goldgelb": "🟨",

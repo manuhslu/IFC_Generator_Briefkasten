@@ -45,14 +45,23 @@ def convert_ifc_to_glb(ifc_path: Path, glb_path: Path):
 
 if __name__ == "__main__":
     # Dieser Block dient zum direkten Testen des Skripts
-    # Erstelle eine Dummy-IFC-Datei zum Testen
-    from generate_mailbox_ifc import generate_mailbox_ifc
-    print("Teste Konvertierung...")
-    test_ifc_path = generate_mailbox_ifc(width=0.4, depth=0.2, height=0.5, color="#004E8A")
-    if test_ifc_path:
-        test_glb_path = test_ifc_path.with_suffix(".glb")
-        convert_ifc_to_glb(test_ifc_path, test_glb_path)
-        print(f"✅ Konvertierung erfolgreich: {test_glb_path}")
-        # Aufräumen
-        test_ifc_path.unlink()
-        test_glb_path.unlink()
+    # Erstelle Dummy-IFC-Dateien analog zu den Tests in generate_mailbox_v2 (__main__)
+    from generate_mailbox_v2 import generate_mailbox_ifc
+    tests = [
+        {"rows": 1, "columns": 1, "color": "#4D6F39", "name": "test_generate_mailbox_1x1"},
+        # Maximal: rows=3 (X), columns=5 (Z)
+        {"rows": 5, "columns": 3, "color": "#4D6F39", "name": "test_generate_mailbox_5x3"},
+    ]
+
+    for t in tests:
+        print(f"Teste Konvertierung für {t['name']}...")
+        ifc_path = generate_mailbox_ifc(
+            rows=t["rows"],
+            columns=t["columns"],
+            color=t["color"],
+            output_path=Path(f"{t['name']}.ifc"),
+        )
+        if ifc_path:
+            glb_path = Path(f"{t['name']}.glb")
+            convert_ifc_to_glb(ifc_path, glb_path)
+            print(f"✅ Konvertierung erfolgreich: {glb_path}")
