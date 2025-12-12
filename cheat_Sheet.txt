@@ -18,7 +18,8 @@
 
 # 4. Projekt starten (z. B.):
 > python main.py
-> streamlit run app.py
+> streamlit run main.py
+> python -m streamlit run main.py
 
 # 5. Beenden:
 > Ctrl + C

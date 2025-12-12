@@ -1,10 +1,5 @@
-# Virtuelle Umgebung
-.venv/
-venv/
-
-# Python Cache
+# Python Cache und temporäre Dateien ignorieren
 __pycache__/
-*.pyc
 
-# Datenbanken
-*.db
+# Generierte IFC-Modelle nicht hochladen (nur das Skript)
+# *.ifc
