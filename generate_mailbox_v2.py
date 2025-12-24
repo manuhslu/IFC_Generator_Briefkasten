@@ -13,8 +13,24 @@ from typing import Optional
 
 import ifcopenshell
 
-BASE_WIDTH = 0.409
-BASE_HEIGHT = 0.3115
+# Basis-Profil: 12 Punkte mit 4 Bögen , in Metern
+BASE_OUTER_POINTS = [
+    (0.0, 0.3110),
+    (0.0, 0.0005),
+    (0.0, 0.0),       # arc start 1
+    (0.0005, 0.0),
+    (0.4085, 0.0),
+    (0.4090, 0.0),    # arc start 2
+    (0.4090, 0.0005),
+    (0.4090, 0.3110),
+    (0.4090, 0.3115), # arc start 3
+    (0.4085, 0.3115),
+    (0.0005, 0.3115),
+    (0.0, 0.3115),    # arc start 4
+]
+ARC_INDICES = [2, 5, 8, 11]  # 1-based middle points for IfcArcIndex
+BASE_WIDTH = max(p[0] for p in BASE_OUTER_POINTS) - min(p[0] for p in BASE_OUTER_POINTS)  # 0.409
+BASE_HEIGHT = max(p[1] for p in BASE_OUTER_POINTS) - min(p[1] for p in BASE_OUTER_POINTS)  # 0.3115
 
 HOLES = [
     {
@@ -48,7 +64,7 @@ MANUFACTURER_INFO = {
 # Farb-Mapping für Property-Sets (Hex -> Name)
 RAL_COLORS_MAP = {
     "#C0C0C0": "Farblos eloxiert",
-    "#292C2F": "RAL 9011 - Graphitschwarz",
+    "#000000": "RAL 9011 - Graphitschwarz",
     "#F7FBF5": "RAL 9016 - Verkehrsweiss",
     "#383E42": "RAL 7016 - Anthrazitgrau",
     "#7A7B7A": "RAL 7037 - Staubgrau",
@@ -102,31 +118,8 @@ def create_indexed_polycurve(f, points, arc_points=None, closed=True):
     return f.create_entity("IfcIndexedPolyCurve", plist, Segments=segments)
 
 
-def generate_rounded_profile(width, height, radius=0.0005):
-    """
-    Erzeugt ein Rechteck mit abgerundeten Ecken (Radius fix).
-    Verhindert verzerrte Bögen bei Skalierung.
-    """
-    # Sicherstellen, dass Radius nicht zu groß für die Dimensionen ist
-    radius = min(radius, width/2, height/2)
-    
-    # Punkte im Uhrzeigersinn (oder CCW), beginnend oben links
-    # Struktur passend für ARC_INDICES [2, 5, 8, 11]
-    points = [
-        (0.0, height - radius),      # 1. Start Bogen TL (eigentlich Ende Linie links)
-        (0.0, radius),               # 2. Start Bogen BL
-        (0.0, 0.0),                  # 3. Mitte Bogen BL
-        (radius, 0.0),               # 4. Ende Bogen BL
-        (width - radius, 0.0),       # 5. Start Bogen BR
-        (width, 0.0),                # 6. Mitte Bogen BR
-        (width, radius),             # 7. Ende Bogen BR
-        (width, height - radius),    # 8. Start Bogen TR
-        (width, height),             # 9. Mitte Bogen TR
-        (width - radius, height),    # 10. Ende Bogen TR
-        (radius, height),            # 11. Start Bogen TL
-        (0.0, height),               # 12. Mitte Bogen TL
-    ]
-    return points
+def scale_profile(points, sx, sy):
+    return [(p[0] * sx, p[1] * sy) for p in points]
 
 
 def bounding_rectangle(points):
@@ -146,18 +139,6 @@ def inset_rectangle(points, offset):
         (xmax - offset, ymax - offset),
         (xmax - offset, ymin + offset),
     ]
-
-def reposition_holes(holes, new_width, base_width):
-    """Zentriert die Löcher horizontal basierend auf der neuen Breite."""
-    offset_x = (new_width - base_width) / 2.0
-    new_holes = []
-    for h in holes:
-        new_points = []
-        for p in h["points"]:
-            # X verschieben, Y bleibt gleich (relativ zum Boden)
-            new_points.append((p[0] + offset_x, p[1]))
-        new_holes.append({"name": h["name"], "points": new_points})
-    return new_holes
 
 
 # ------------------ Styling & Properties Helfer ------------------
@@ -434,7 +415,7 @@ def generate_mailbox_ifc(
     rows: int = 1,
     columns: int = 1,
     output_path: Optional[Path] = None,
-    color: str = "#C0C0C0",  # Default: Farblos eloxiert / Grau
+    color: str = "#C72727",  # Default: Farblos eloxiert / Grau
 ) -> Optional[Path]:
     rows = max(1, min(rows, 5))
     columns = max(1, min(columns, 3))
@@ -487,33 +468,38 @@ def generate_mailbox_ifc(
         pset_data = MANUFACTURER_INFO.copy()
         pset_data["Color"] = color_name
 
-        # 1. Profil für Einzelkasten generieren (Runde Ecken bleiben rund!)
-        scaled_outer_single = generate_rounded_profile(width, height)
-        
-        # 2. Löcher anpassen (Zentrieren), damit sie nicht aus dem Blech ragen
-        adjusted_holes = reposition_holes(HOLES, width, BASE_WIDTH)
+        # Skalierungsfaktoren für ein einzelnes Profil
+        sx_single = width / BASE_WIDTH
+        sy_single = height / BASE_HEIGHT
+        scaled_outer_single = scale_profile(BASE_OUTER_POINTS, sx_single, sy_single)
 
         # Frame über das gesamte Raster
         total_width = rows * width + (rows - 1) * GAP
         total_height = columns * height + (columns - 1) * GAP
-        
-        # 3. Profil für den großen Rahmen generieren
-        frame_outer = generate_rounded_profile(total_width, total_height)
-        
-        # Inneres Rechteck für den Rahmen berechnen
+        sx_total = total_width / BASE_WIDTH
+        sy_total = total_height / BASE_HEIGHT
+        frame_outer = scale_profile(BASE_OUTER_POINTS, sx_total, sy_total)
         xmin, xmax, ymin, ymax = bounding_rectangle(frame_outer)
-        # Wir nutzen inset_rectangle mit negativen Werten für Offset nach außen/innen
-        # Achtung: inset_rectangle zieht ab. Negativer Offset = vergrößern.
-        frame_outer_rect = inset_rectangle(frame_outer, -FRAME_OUTER_OFFSET) # noch weiter außen
-        frame_inner_rect = inset_rectangle(frame_outer, -FRAME_INNER_OFFSET) # etwas weniger weit außen
+        frame_outer = [
+            (xmin - FRAME_OUTER_OFFSET, ymin - FRAME_OUTER_OFFSET),
+            (xmin - FRAME_OUTER_OFFSET, ymax + FRAME_OUTER_OFFSET),
+            (xmax + FRAME_OUTER_OFFSET, ymax + FRAME_OUTER_OFFSET),
+            (xmax + FRAME_OUTER_OFFSET, ymin - FRAME_OUTER_OFFSET),
+        ]
+        frame_inner = [
+            (xmin - FRAME_INNER_OFFSET, ymin - FRAME_INNER_OFFSET),
+            (xmin - FRAME_INNER_OFFSET, ymax + FRAME_INNER_OFFSET),
+            (xmax + FRAME_INNER_OFFSET, ymax + FRAME_INNER_OFFSET),
+            (xmax + FRAME_INNER_OFFSET, ymin - FRAME_INNER_OFFSET),
+        ]
 
         # Rahmen erzeugen (nur im zweiten Furnishing, nicht mehr doppelt)
         frame_element = create_frame(
             f,
             body_ctx,
             "Briefkastenrahmen",
-            frame_outer_rect, # Korrigiert: Rechteckige Erweiterung des abgerundeten Profils
-            frame_inner_rect,
+            frame_outer,
+            frame_inner,
             depth,
             bierkasten_frame_lp,
             aggregate_parent=bierkasten_frame,
@@ -525,12 +511,9 @@ def generate_mailbox_ifc(
 
         # --- VORBEREITUNG: Geometrien einmalig erstellen (Performance & Dateigröße) ---
         
-        # Konstante Indizes für die Bögen in generate_rounded_profile
-        ROUNDED_ARC_INDICES = [2, 5, 8, 11]
-
         # 1. Deckblatt-Geometrie
         hole_curves = []
-        for h in adjusted_holes:
+        for h in HOLES:
             hole_curves.append(
                 create_indexed_polycurve(
                     f,
@@ -541,7 +524,7 @@ def generate_mailbox_ifc(
             )
         
         shape_deckblatt = create_extruded_shape(
-            f, body_ctx, scaled_outer_single, hole_curves, PLATE_THICKNESS, arc_indices=ROUNDED_ARC_INDICES
+            f, body_ctx, scaled_outer_single, hole_curves, PLATE_THICKNESS, arc_indices=ARC_INDICES
         )
         # Deckblatt bekommt die Farbe
         assign_style_to_shape(f, shape_deckblatt, main_style)
@@ -556,7 +539,7 @@ def generate_mailbox_ifc(
             3: "Einwurfklappe",
         }
         
-        for idx, hole in enumerate(adjusted_holes, start=1):
+        for idx, hole in enumerate(HOLES, start=1):
             shrunk_hole = inset_rectangle(hole["points"], inset_offset)
             # Wichtig: arc_indices=[] übergeben, da Einlagen rechteckig sind (keine Bögen)
             shape = create_extruded_shape(f, body_ctx, shrunk_hole, [], PLATE_THICKNESS, arc_indices=[])
@@ -589,7 +572,7 @@ def generate_mailbox_ifc(
                 add_property_set(f, plate_deck, "Pset_ManufacturerTypeInformation", pset_data)
 
                 # Einlagen platzieren
-                for idx, hole in enumerate(adjusted_holes, start=1):
+                for idx, hole in enumerate(HOLES, start=1):
                     plate_insert = create_plate(
                         f,
                         body_ctx,
