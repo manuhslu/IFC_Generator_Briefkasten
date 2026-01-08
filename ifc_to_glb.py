@@ -20,7 +20,7 @@ def convert_ifc_to_glb(ifc_path: Path, glb_path: Path):
     settings.set("apply-default-materials", True)
 
     # Optional: Weltkoordinaten verwenden
-    settings.set("use-world-coords", True)
+    settings.set("use-world-coords", False)
 
     # Serialisierer konfigurieren
     serialiser_settings = ifcopenshell.geom.serializer_settings()

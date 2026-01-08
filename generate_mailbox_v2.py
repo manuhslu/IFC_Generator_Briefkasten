@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 import ifcopenshell
+import ifcopenshell.guid
 
 # Basis-Profil: 12 Punkte mit 4 Bögen , in Metern
 BASE_OUTER_POINTS = [
@@ -288,22 +289,27 @@ def create_plate(
     placement_rel_to,
     spatial_container=None,
     aggregate_parent=None,
-    representation=None,  # Neu: Optionale fertige Geometrie
-    arc_indices=None,     # Neu: Spezifische Bogen-Indizes
+    representation=None,
+    product_def_shape=None, # Neu: Für Instancing
+    arc_indices=None,
+    pos_offset=(0.0, 0.0, 0.0) # Neu: Offset zur Vermeidung von Z-Fighting
 ):
-    if representation:
-        shape_rep = representation
+    # Geometrie-Handling: Entweder existierende Shape nutzen (Instancing) oder neu erstellen
+    if product_def_shape:
+        prod_shape = product_def_shape
+    elif representation:
+        prod_shape = f.create_entity("IfcProductDefinitionShape", Representations=[representation])
     else:
-        # Fallback: Geometrie neu erstellen (Standardverhalten mit globalen ARC_INDICES wenn nichts übergeben)
+        # Fallback: Geometrie neu erstellen
         use_arcs = arc_indices if arc_indices is not None else ARC_INDICES
         shape_rep = create_extruded_shape(f, body_ctx, outer_points, inner_curves, thickness, use_arcs)
+        prod_shape = f.create_entity("IfcProductDefinitionShape", Representations=[shape_rep])
 
-    prod_shape = f.create_entity("IfcProductDefinitionShape", None, None, [shape_rep])
-
+    # Placement mit Offset
     loc = f.create_entity(
         "IfcLocalPlacement",
         placement_rel_to,
-        axis2placement3d(f, (0.0, 0.0, 0.0), zdir=(0.0, 0.0, -1.0), xdir=(-1.0, 0.0, 0.0)),
+        axis2placement3d(f, pos_offset, zdir=(0.0, 0.0, -1.0), xdir=(-1.0, 0.0, 0.0)),
     )
 
     plate = f.create_entity(
@@ -509,9 +515,9 @@ def generate_mailbox_ifc(
         assign_style_to_shape(f, frame_element.Representation.Representations[0], main_style)
         add_property_set(f, frame_element, "Pset_ManufacturerTypeInformation", pset_data)
 
-        # --- VORBEREITUNG: Geometrien einmalig erstellen (Performance & Dateigröße) ---
+        # --- VORBEREITUNG: Geometrien einmalig erstellen (Instancing) ---
         
-        # 1. Deckblatt-Geometrie
+        # 1. Deckblatt-Geometrie (Shared ProductDefinitionShape)
         hole_curves = []
         for h in HOLES:
             hole_curves.append(
@@ -523,15 +529,16 @@ def generate_mailbox_ifc(
                 )
             )
         
-        shape_deckblatt = create_extruded_shape(
+        shape_deckblatt_rep = create_extruded_shape(
             f, body_ctx, scaled_outer_single, hole_curves, PLATE_THICKNESS, arc_indices=ARC_INDICES
         )
-        # Deckblatt bekommt die Farbe
-        assign_style_to_shape(f, shape_deckblatt, main_style)
+        assign_style_to_shape(f, shape_deckblatt_rep, main_style)
+        
+        # Erstelle das ProductDefinitionShape EINMALIG
+        deck_product_shape = f.create_entity("IfcProductDefinitionShape", Representations=[shape_deckblatt_rep])
 
-        # 2. Einlagen-Geometrien
-        # Wir speichern die Shapes in einem Dictionary für späteren Zugriff
-        shapes_inserts = {}
+        # 2. Einlagen-Geometrien (Shared ProductDefinitionShapes)
+        insert_product_shapes = {}
         inset_offset = 0.001
         insert_names = {
             1: "Schild Keine Werbung",
@@ -541,46 +548,50 @@ def generate_mailbox_ifc(
         
         for idx, hole in enumerate(HOLES, start=1):
             shrunk_hole = inset_rectangle(hole["points"], inset_offset)
-            # Wichtig: arc_indices=[] übergeben, da Einlagen rechteckig sind (keine Bögen)
-            shape = create_extruded_shape(f, body_ctx, shrunk_hole, [], PLATE_THICKNESS, arc_indices=[])
-            shapes_inserts[idx] = shape
+            # Wichtig: arc_indices=[] übergeben, da Einlagen rechteckig sind
+            shape_rep = create_extruded_shape(f, body_ctx, shrunk_hole, [], PLATE_THICKNESS, arc_indices=[])
             
             if idx == 3: # Einwurfklappe bekommt auch die Farbe
-                assign_style_to_shape(f, shape, main_style)
+                assign_style_to_shape(f, shape_rep, main_style)
+            
+            # Erstelle das ProductDefinitionShape EINMALIG pro Typ
+            prod_shape = f.create_entity("IfcProductDefinitionShape", Representations=[shape_rep])
+            insert_product_shapes[idx] = prod_shape
 
         # Raster an Platten (Deckblatt + Einlagen) erzeugen
         for r in range(rows):
             for c in range(columns):
                 offset_x = -(r * (width + GAP))
                 offset_z = c * (height + GAP)
-                cell_lp = f.create_entity(
-                    "IfcLocalPlacement",
-                    bierkasten_lp,
-                    axis2placement3d(f, (offset_x, 0.0, offset_z)),
-                )
 
-                # Deckblatt platzieren (Wiederverwendung der Geometrie)
+                # Deckblatt platzieren (Direkt an Bierkasten, flache Hierarchie für besseren Export)
+                deck_pos = (offset_x, 0.0, offset_z)
                 plate_deck = create_plate(
                     f,
                     body_ctx,
                     "Deckblatt Briefkasten",
                     None, None, None, # Keine Geometrie-Daten nötig
-                    cell_lp,
+                    bierkasten_lp,
                     aggregate_parent=bierkasten,
-                    representation=shape_deckblatt # Hier übergeben wir die fertige Form
+                    product_def_shape=deck_product_shape, # Instancing
+                    pos_offset=deck_pos
                 )
                 add_property_set(f, plate_deck, "Pset_ManufacturerTypeInformation", pset_data)
 
                 # Einlagen platzieren
                 for idx, hole in enumerate(HOLES, start=1):
+                    # Offset hinzufügen (Z-Fighting) + Grid Position
+                    insert_pos = (offset_x, 0.0, offset_z + 0.0005)
+
                     plate_insert = create_plate(
                         f,
                         body_ctx,
                         insert_names.get(idx, hole["name"]),
                         None, None, None,
-                        cell_lp,
+                        bierkasten_lp,
                         aggregate_parent=bierkasten,
-                        representation=shapes_inserts[idx] # Wiederverwendung
+                        product_def_shape=insert_product_shapes[idx],
+                        pos_offset=insert_pos
                     )
                     add_property_set(f, plate_insert, "Pset_ManufacturerTypeInformation", pset_data)
 
