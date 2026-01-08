@@ -14,22 +14,14 @@ from typing import Optional
 import ifcopenshell
 import ifcopenshell.guid
 
-# Basis-Profil: 12 Punkte mit 4 Bögen , in Metern
+# Basis-Profil: 4 Punkte (Rechteck), keine Bögen mehr
 BASE_OUTER_POINTS = [
-    (0.0, 0.3110),
-    (0.0, 0.0005),
-    (0.0, 0.0),       # arc start 1
-    (0.0005, 0.0),
-    (0.4085, 0.0),
-    (0.4090, 0.0),    # arc start 2
-    (0.4090, 0.0005),
-    (0.4090, 0.3110),
-    (0.4090, 0.3115), # arc start 3
-    (0.4085, 0.3115),
-    (0.0005, 0.3115),
-    (0.0, 0.3115),    # arc start 4
+    (0.0, 0.0),
+    (0.4090, 0.0),
+    (0.4090, 0.3115),
+    (0.0, 0.3115),
 ]
-ARC_INDICES = [2, 5, 8, 11]  # 1-based middle points for IfcArcIndex
+ARC_INDICES = []  # Keine Bögen mehr
 BASE_WIDTH = max(p[0] for p in BASE_OUTER_POINTS) - min(p[0] for p in BASE_OUTER_POINTS)  # 0.409
 BASE_HEIGHT = max(p[1] for p in BASE_OUTER_POINTS) - min(p[1] for p in BASE_OUTER_POINTS)  # 0.3115
 
@@ -279,6 +271,24 @@ def create_extruded_shape(f, body_ctx, outer_points, inner_curves, thickness, ar
     return f.create_entity("IfcShapeRepresentation", body_ctx, "Body", "SweptSolid", [solid])
 
 
+def create_representation_map(f, representation):
+    """Erstellt eine IfcRepresentationMap für eine gegebene Representation."""
+    origin = axis2placement3d(f)
+    return f.create_entity("IfcRepresentationMap", MappingOrigin=origin, MappedRepresentation=representation)
+
+
+def create_mapped_item_shape(f, body_ctx, rep_map):
+    """Erstellt ein ProductDefinitionShape, das ein IfcMappedItem enthält."""
+    # MappingTarget: Identity Transform (da wir IfcLocalPlacement nutzen)
+    op_origin = create_point(f, (0.0, 0.0, 0.0))
+    operator = f.create_entity("IfcCartesianTransformationOperator3D", LocalOrigin=op_origin)
+    
+    mapped_item = f.create_entity("IfcMappedItem", MappingSource=rep_map, MappingTarget=operator)
+    
+    shape_rep = f.create_entity("IfcShapeRepresentation", ContextOfItems=body_ctx, RepresentationIdentifier="Body", RepresentationType="MappedRepresentation", Items=[mapped_item])
+    return f.create_entity("IfcProductDefinitionShape", Representations=[shape_rep])
+
+
 def create_plate(
     f,
     body_ctx,
@@ -291,11 +301,14 @@ def create_plate(
     aggregate_parent=None,
     representation=None,
     product_def_shape=None, # Neu: Für Instancing
+    representation_map=None, # Neu: Für MappedItem Instancing (besser für GLB)
     arc_indices=None,
     pos_offset=(0.0, 0.0, 0.0) # Neu: Offset zur Vermeidung von Z-Fighting
 ):
     # Geometrie-Handling: Entweder existierende Shape nutzen (Instancing) oder neu erstellen
-    if product_def_shape:
+    if representation_map:
+        prod_shape = create_mapped_item_shape(f, body_ctx, representation_map)
+    elif product_def_shape:
         prod_shape = product_def_shape
     elif representation:
         prod_shape = f.create_entity("IfcProductDefinitionShape", Representations=[representation])
@@ -534,11 +547,11 @@ def generate_mailbox_ifc(
         )
         assign_style_to_shape(f, shape_deckblatt_rep, main_style)
         
-        # Erstelle das ProductDefinitionShape EINMALIG
-        deck_product_shape = f.create_entity("IfcProductDefinitionShape", Representations=[shape_deckblatt_rep])
+        # Erstelle RepresentationMap (für echtes Instancing via IfcMappedItem)
+        deck_map = create_representation_map(f, shape_deckblatt_rep)
 
-        # 2. Einlagen-Geometrien (Shared ProductDefinitionShapes)
-        insert_product_shapes = {}
+        # 2. Einlagen-Geometrien (Maps)
+        insert_maps = {}
         inset_offset = 0.001
         insert_names = {
             1: "Schild Keine Werbung",
@@ -554,9 +567,8 @@ def generate_mailbox_ifc(
             if idx == 3: # Einwurfklappe bekommt auch die Farbe
                 assign_style_to_shape(f, shape_rep, main_style)
             
-            # Erstelle das ProductDefinitionShape EINMALIG pro Typ
-            prod_shape = f.create_entity("IfcProductDefinitionShape", Representations=[shape_rep])
-            insert_product_shapes[idx] = prod_shape
+            # Map erstellen
+            insert_maps[idx] = create_representation_map(f, shape_rep)
 
         # Raster an Platten (Deckblatt + Einlagen) erzeugen
         for r in range(rows):
@@ -573,7 +585,7 @@ def generate_mailbox_ifc(
                     None, None, None, # Keine Geometrie-Daten nötig
                     bierkasten_lp,
                     aggregate_parent=bierkasten,
-                    product_def_shape=deck_product_shape, # Instancing
+                    representation_map=deck_map, # MappedItem Instancing
                     pos_offset=deck_pos
                 )
                 add_property_set(f, plate_deck, "Pset_ManufacturerTypeInformation", pset_data)
@@ -590,7 +602,7 @@ def generate_mailbox_ifc(
                         None, None, None,
                         bierkasten_lp,
                         aggregate_parent=bierkasten,
-                        product_def_shape=insert_product_shapes[idx],
+                        representation_map=insert_maps[idx],
                         pos_offset=insert_pos
                     )
                     add_property_set(f, plate_insert, "Pset_ManufacturerTypeInformation", pset_data)
