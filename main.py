@@ -19,14 +19,14 @@ DEFAULT_FARBE = "#C0C0C0"  # Farblos eloxiert / Grau
 
 @st.cache_data(show_spinner=False)
 def generate_and_convert_model(
-    width: float, height: float, depth: float, color: str, rows: int, columns: int, edge_color: str
+    width: float, height: float, depth: float, color: str, rows: int, columns: int
 ) -> Optional[Tuple[bytes, bytes]]:
     """
     Generiert ein IFC-Modell, konvertiert es nach GLB und gibt die GLB- und IFC-Daten als Bytes zurück.
     Streamlit's Caching verhindert die Neugenerierung bei gleichen Parametern.
     """
     ifc_path = generate_mailbox_ifc(
-        width=width, height=height, depth=depth, color=color, rows=rows, columns=columns, edge_color=edge_color
+        width=width, height=height, depth=depth, color=color, rows=rows, columns=columns
     )
     if not ifc_path:
         st.error("IFC-Datei konnte nicht erstellt werden.")
@@ -120,15 +120,24 @@ def get_model_viewer_html(
 
 
 # --- Session State Initialisierung ---
-if 'step' not in st.session_state:
-    st.session_state.step = "initial" # Zustand 1: Initialisierung
+if 'breite' not in st.session_state:
     st.session_state.breite = DEFAULT_BREITE
+if 'hoehe' not in st.session_state:
     st.session_state.hoehe = DEFAULT_HOEHE
+if 'tiefe' not in st.session_state:
     st.session_state.tiefe = DEFAULT_TIEFE
+if 'farbe' not in st.session_state:
     st.session_state.farbe = DEFAULT_FARBE
+if 'rows' not in st.session_state:
     st.session_state.rows = 1
+if 'columns' not in st.session_state:
     st.session_state.columns = 1
-    st.session_state.edge_color = "#000000" # Default Schwarz
+if 'mounting_type' not in st.session_state:
+    st.session_state.mounting_type = "Wandmontage"
+if 'sonerie_active' not in st.session_state:
+    st.session_state.sonerie_active = False
+if 'format_selection' not in st.session_state:
+    st.session_state.format_selection = "Benutzerdefiniert"
 
 # --- Zentrale Modellgenerierung ---
 # Das Modell wird immer basierend auf dem aktuellen session_state generiert.
@@ -143,91 +152,130 @@ with st.spinner("Aktualisiere Modell..."):
         st.session_state.farbe,
         st.session_state.rows,
         st.session_state.columns,
-        st.session_state.edge_color,
     )
     if model_data:
         glb_bytes, ifc_bytes = model_data
 
 # --- UI Rendering ---
+# --- Layout & CSS ---
+st.markdown("""
+    <style>
+    /* Fixiert die linke Spalte (Viewer) */
+    div[data-testid="column"]:nth-of-type(1) > div {
+        position: sticky;
+        top: 2rem;
+        z-index: 100;
+    }
+    /* Sticky Footer für Download-Buttons in der rechten Spalte */
+    .download-container {
+        position: sticky;
+        bottom: 0;
+        background-color: white;
+        padding: 1rem 0;
+        border-top: 1px solid #f0f2f6;
+        z-index: 99;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 # --- Layout: Links Viewer, rechts Eingabe ---
 col1, col2 = st.columns([2, 1])
 
 # ---------- RECHTS: Eingaben ----------
 with col2:
-    # Zustand 1: Initialisierung (Startansicht)
-    if st.session_state.step == "initial":
-        st.subheader("Willkommen!")
-        if st.button("Start Konfiguration", type="primary"):
-            st.session_state.step = "size" # Wechsel zu Zustand 2
-            st.rerun()
+    st.subheader("Konfiguration")
 
-    # Zustand 2: Größenanpassung
-    elif st.session_state.step == "size":
-        st.subheader("1. Grösse anpassen")
+    # Callback für Format-Änderung
+    def update_dims():
+        fmt = st.session_state.format_selection
+        if fmt == "Querformat":
+            st.session_state.breite = 0.409
+            st.session_state.hoehe = 0.312
+            st.session_state.tiefe = 0.355
+        elif fmt == "Hochformat":
+            st.session_state.breite = 0.300
+            st.session_state.hoehe = 0.312
+            st.session_state.tiefe = 0.455
+
+    # Section 1: Format & Grösse
+    st.markdown("### Format & Grösse")
+    
+    st.radio(
+        "Format wählen", 
+        ["Querformat", "Hochformat", "Benutzerdefiniert"], 
+        key="format_selection", 
+        on_change=update_dims,
+        horizontal=True
+    )
+
+    if st.session_state.format_selection == "Benutzerdefiniert":
         st.session_state.breite = st.slider("Breite [m]", 0.2, 1.0, st.session_state.breite, 0.05)
         st.session_state.hoehe = st.slider("Höhe [m]", 0.2, 1.0, st.session_state.hoehe, 0.05)
         st.session_state.tiefe = st.slider("Tiefe [m]", 0.1, 0.5, st.session_state.tiefe, 0.05)
-        
-        st.subheader("Anordnung")
-        st.session_state.columns = st.number_input("Anzahl Spalten", min_value=1, max_value=5, value=st.session_state.columns, step=1)
-        st.session_state.rows = st.number_input("Anzahl Zeilen", min_value=1, max_value=3, value=st.session_state.rows, step=1)
-        
-        st.markdown("---")
+    else:
+        st.info(f"Masse: {st.session_state.breite:.2f}m x {st.session_state.hoehe:.2f}m x {st.session_state.tiefe:.2f}m")
 
-        # Callback zum Schliessen des Dialogs und Zurücksetzen der Checkbox
-        def close_dialog():
-            st.session_state.custom_size_check = False
+    # Section 2: Anordnung
+    st.markdown("### Anordnung")
+    st.caption("Wählen Sie die Grösse durch Klicken auf das Raster:")
 
-        st.checkbox("Wunschgrösse nicht vorhanden?", key="custom_size_check")
-        if st.session_state.get("custom_size_check"):
-            # st.dialog erfordert Streamlit v1.33.0+. Dies ist eine kompatible Alternative.
-            st.info("Wir machen ihre Wünsche möglich! max@mustermann.mustermail.ch")
-            st.button("Ok", on_click=close_dialog)
+    # Grid-Selector: 5 breit (rows), 3 hoch (columns)
+    # Wir rendern von oben (3) nach unten (1), damit es wie ein physischer Aufbau aussieht.
+    for h in range(3, 0, -1):
+        cols_ui = st.columns(5)
+        for w in range(1, 6):
+            # Ist dieser Slot Teil der aktuellen Auswahl?
+            is_selected = (w <= st.session_state.rows) and (h <= st.session_state.columns)
+            btn_type = "primary" if is_selected else "secondary"
+            
+            def update_grid(width=w, height=h):
+                st.session_state.rows = width
+                st.session_state.columns = height
 
-        if st.button("Grösse bestätigen", type="primary"):
-            st.session_state.step = "color" # Wechsel zu Zustand 3
-            st.rerun()
-
-    # Zustand 3: Farbanpassung
-    elif st.session_state.step == "color":
-        st.subheader("2. Farbe wählen")
-        st.markdown(
-            f"""
-            **Ihre Konfiguration:**
-            - **Grösse (B/H/T):** `{st.session_state.breite:.2f} m` / `{st.session_state.hoehe:.2f} m` / `{st.session_state.tiefe:.2f} m`
-            - **Anordnung:** `{st.session_state.rows}` Zeile(n), `{st.session_state.columns}` Spalte(n)
-            """
-        )
-        st.markdown("---")
-
-        previous_color = st.session_state.farbe
-        st.session_state.farbe = color_selector(default_color_hex=st.session_state.farbe)
-        st.markdown("---")
-
-        # st.rerun() wird durch die Interaktion mit dem Radio-Button automatisch ausgelöst
-        if st.session_state.farbe != previous_color:
-            st.rerun()
-
-        if st.button("Konfiguration abschliessen", type="primary"):
-            st.session_state.step = "finished" # Wechsel zu Zustand 4
-            st.rerun()
-
-    # Zustand 4: Abschluss
-    elif st.session_state.step == "finished":
-        st.subheader("✅ Konfiguration abgeschlossen")
-
-        if ifc_bytes:
-            file_name = f"{datetime.now().strftime('%Y-%m-%d')}_Briefkastenanlage.ifc"
-            st.download_button(
-                label="Download IFC",
-                data=ifc_bytes,
-                file_name=file_name,
-                mime="application/x-step",
+            cols_ui[w-1].button(
+                "■", 
+                key=f"btn_grid_{w}_{h}", 
+                type=btn_type, 
+                on_click=update_grid,
+                use_container_width=True,
+                help=f"{w} Breit x {h} Hoch"
             )
+    
+    st.write(f"**Auswahl:** {st.session_state.rows} Breit x {st.session_state.columns} Hoch")
 
-        if st.button("Neue Konfiguration starten"):
-            st.session_state.clear()
-            st.rerun()
+    # Section 3: Farbauswahl
+    st.markdown("### Farbauswahl")
+    st.session_state.farbe = color_selector(default_color_hex=st.session_state.farbe)
+
+    # Section 4: Montage & Technik
+    st.markdown("### Montage & Technik")
+    st.session_state.mounting_type = st.selectbox("Montageart", ["Wandmontage", "Freistehend", "Unterputz"], index=0)
+    st.session_state.sonerie_active = st.checkbox("Sonerie integrieren", value=st.session_state.sonerie_active)
+
+    st.markdown("---")
+
+    # Sticky Bottom Container for Downloads
+    st.markdown('<div class="download-container">', unsafe_allow_html=True)
+    if ifc_bytes:
+        file_name_ifc = f"{datetime.now().strftime('%Y-%m-%d')}_Briefkasten.ifc"
+        st.download_button(
+            label="Download IFC",
+            data=ifc_bytes,
+            file_name=file_name_ifc,
+            mime="application/x-step",
+            use_container_width=True
+        )
+    
+    if glb_bytes:
+        file_name_glb = f"{datetime.now().strftime('%Y-%m-%d')}_Briefkasten.glb"
+        st.download_button(
+            label="Download GLB",
+            data=glb_bytes,
+            file_name=file_name_glb,
+            mime="model/gltf-binary",
+            use_container_width=True
+        )
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ---------- LINKS: Viewer ----------
@@ -243,7 +291,6 @@ with col1:
         environment_image = st.selectbox("Environment Image", ["legacy", "neutral"], index=0)
         metallic_factor = st.slider("Metallic Factor", 0.0, 1.0, 0.4, 0.05)
         roughness_factor = st.slider("Roughness Factor", 0.0, 1.0, 0.3, 0.05)
-        st.session_state.edge_color = st.color_picker("Kantenfarbe (Wireframe)", st.session_state.edge_color)
 
     # Zeigt das Modell nur an, wenn es im Session State vorhanden ist
     if glb_bytes:
@@ -252,6 +299,9 @@ with col1:
 
         viewer_html = get_model_viewer_html(data_url, exposure, shadow_intensity, shadow_softness, tone_mapping, light_rotation, metallic_factor, roughness_factor, environment_image)
         st.components.v1.html(viewer_html, height=620)
+        
+        if st.button("🔄 Ansicht aktualisieren", use_container_width=True):
+            st.rerun()
     else:
         # Fallback, falls die Generierung fehlschlägt
         st.warning("Modell konnte nicht geladen werden.")

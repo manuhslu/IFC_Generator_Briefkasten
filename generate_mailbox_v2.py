@@ -72,7 +72,6 @@ RAL_COLORS_MAP = {
 def _listf(vals):
     return [float(x) for x in vals]
 
-
 def create_direction(f, xyz):
     return f.create_entity("IfcDirection", _listf(xyz))
 
@@ -163,16 +162,11 @@ def create_surface_style(f, name, rgb):
         Styles=[surface_style_rendering]
     )
 
-def create_curve_style(f, name, rgb):
-    """Erstellt einen IfcCurveStyle für Linien/Kanten."""
-    colour_rgb = f.create_entity("IfcColourRgb", None, *rgb)
-    return f.create_entity("IfcCurveStyle", Name=name, CurveColour=colour_rgb)
-
 def assign_style_to_shape(f, shape_rep, style):
-    """Weist den Style allen Items der ShapeRepresentation zu."""
+    """Weist den Style dem ersten Item der ShapeRepresentation zu."""
     if shape_rep and shape_rep.Items:
-        for item in shape_rep.Items:
-            f.create_entity("IfcStyledItem", Item=item, Styles=[style], Name="StyleAssignment")
+        item = shape_rep.Items[0]
+        f.create_entity("IfcStyledItem", Item=item, Styles=[style], Name="StyleAssignment")
 
 def add_property_set(f, product, pset_name, properties_dict):
     """Fügt einem Produkt ein PropertySet hinzu."""
@@ -484,6 +478,43 @@ def create_frame(
     return frame
 
 
+def make_sonerie_csg(f, body_ctx, width, height, thickness, style, details=None):
+    """
+    Erstellt die Geometrie für ein Sonerie-Modul (Klingel/Kamera).
+    Gibt eine Liste von RepresentationMaps zurück [Solid, Wireframe].
+    """
+    # Basis-Profil skalieren
+    sx = width / BASE_WIDTH
+    sy = height / BASE_HEIGHT
+    outer = scale_profile(BASE_OUTER_POINTS, sx, sy)
+    
+    # Standard-Löcher für Kamera/Lautsprecher, falls keine Details übergeben
+    holes_def = [
+        {"points": [(0.18, 0.22), (0.18, 0.26), (0.22, 0.26), (0.22, 0.22)]}, # Kamera
+        {"points": [(0.10, 0.10), (0.10, 0.18), (0.30, 0.18), (0.30, 0.10)]}, # Lautsprecher
+    ]
+    
+    # Hier könnte man 'details' auswerten, um Positionen anzupassen
+    
+    hole_curves = []
+    hole_points_list = []
+    
+    for h in holes_def:
+        # Skalieren
+        sp = scale_profile(h["points"], sx, sy)
+        hole_points_list.append(sp)
+        hole_curves.append(create_indexed_polycurve(f, sp, closed=True))
+        
+    # Solid erstellen
+    shape_rep = create_extruded_shape(f, body_ctx, outer, hole_curves, thickness, arc_indices=ARC_INDICES)
+    assign_style_to_shape(f, shape_rep, style)
+    
+    # Wireframe erstellen
+    shape_wire = create_3d_wireframe(f, body_ctx, outer, thickness, hole_points_list)
+    
+    return [create_representation_map(f, shape_rep), create_representation_map(f, shape_wire)]
+
+
 # ------------------ Hauptgenerator ------------------
 
 def generate_mailbox_ifc(
@@ -494,7 +525,10 @@ def generate_mailbox_ifc(
     columns: int = 1,
     output_path: Optional[Path] = None,
     color: str = "#C72727",  # Default: Farblos eloxiert / Grau
-    edge_color: str = "#000000", # Default: Schwarz
+    mounting_type: str = "Wand",
+    installation_height: float = 1.5,
+    sonerie_index: int = -1,
+    sonerie_details: Optional[dict] = None,
 ) -> Optional[Path]:
     rows = max(1, min(rows, 5))
     columns = max(1, min(columns, 3))
@@ -541,10 +575,10 @@ def generate_mailbox_ifc(
         # --- Styling vorbereiten ---
         rgb_color = hex_to_rgb(color)
         main_style = create_surface_style(f, f"Style_{color}", rgb_color)
-
-        # Stil für Kanten: Dynamisch aus Parameter
-        edge_rgb = hex_to_rgb(edge_color)
-        edge_style = create_curve_style(f, "Style_Edges", edge_rgb)
+        
+        # Style für Sonerie (Dunkler/Kontrast)
+        sonerie_rgb = (0.2, 0.2, 0.2) # Dunkelgrau
+        sonerie_style = create_surface_style(f, "Style_Sonerie", sonerie_rgb)
 
         # --- Property Set Daten vorbereiten ---
         color_name = get_color_name(color)
@@ -559,6 +593,10 @@ def generate_mailbox_ifc(
         # Frame über das gesamte Raster
         total_width = rows * width + (rows - 1) * GAP
         total_height = columns * height + (columns - 1) * GAP
+        
+        # Höhenberechnung (Oberkante = installation_height)
+        elevation_z = max(0.0, installation_height - total_height)
+        
         sx_total = total_width / BASE_WIDTH
         sy_total = total_height / BASE_HEIGHT
         frame_outer = scale_profile(BASE_OUTER_POINTS, sx_total, sy_total)
@@ -576,6 +614,11 @@ def generate_mailbox_ifc(
             (xmax + FRAME_INNER_OFFSET, ymin - FRAME_INNER_OFFSET),
         ]
 
+        # Update LocalPlacement für Container (Elevation anwenden)
+        elev_placement = axis2placement3d(f, (0.0, 0.0, elevation_z))
+        bierkasten_lp.RelativePlacement = elev_placement
+        bierkasten_frame_lp.RelativePlacement = elev_placement
+
         # Rahmen erzeugen (nur im zweiten Furnishing, nicht mehr doppelt)
         frame_element = create_frame(
             f,
@@ -590,8 +633,6 @@ def generate_mailbox_ifc(
         
         # Style und Pset auf Rahmen anwenden
         assign_style_to_shape(f, frame_element.Representation.Representations[0], main_style)
-        if len(frame_element.Representation.Representations) > 1:
-            assign_style_to_shape(f, frame_element.Representation.Representations[1], edge_style)
         add_property_set(f, frame_element, "Pset_ManufacturerTypeInformation", pset_data)
 
         # --- Rückwand erzeugen ---
@@ -612,8 +653,6 @@ def generate_mailbox_ifc(
         )
         # create_plate erstellt jetzt automatisch Wireframe, wenn keine Map übergeben wird
         assign_style_to_shape(f, back_panel.Representation.Representations[0], main_style)
-        if len(back_panel.Representation.Representations) > 1:
-            assign_style_to_shape(f, back_panel.Representation.Representations[1], edge_style)
         add_property_set(f, back_panel, "Pset_ManufacturerTypeInformation", pset_data)
 
         # --- VORBEREITUNG: Geometrien einmalig erstellen (Instancing) ---
@@ -658,7 +697,6 @@ def generate_mailbox_ifc(
         # Wireframe für Deckblatt erstellen (inkl. Löcher)
         deck_holes_points = [h["points"] for h in adjusted_holes]
         shape_deckblatt_wireframe = create_3d_wireframe(f, body_ctx, scaled_outer_single, PLATE_THICKNESS, deck_holes_points)
-        assign_style_to_shape(f, shape_deckblatt_wireframe, edge_style)
         
         # Maps erstellen (Solid und Wireframe separat)
         deck_map = create_representation_map(f, shape_deckblatt_rep)
@@ -680,22 +718,38 @@ def generate_mailbox_ifc(
             
             # Wireframe für Einlage
             shape_wireframe = create_3d_wireframe(f, body_ctx, shrunk_hole, PLATE_THICKNESS)
-            assign_style_to_shape(f, shape_wireframe, edge_style)
             
             if idx == 3: # Einwurfklappe bekommt auch die Farbe
                 assign_style_to_shape(f, shape_rep, main_style)
             
             # Maps speichern (Liste: [Solid, Wireframe])
             insert_maps[idx] = [create_representation_map(f, shape_rep), create_representation_map(f, shape_wireframe)]
+            
+        # 3. Sonerie-Geometrie (Maps)
+        sonerie_maps = make_sonerie_csg(f, body_ctx, width, height, PLATE_THICKNESS, sonerie_style, sonerie_details)
 
         # Raster an Platten (Deckblatt + Einlagen) erzeugen
+        current_idx = 0
         for r in range(rows):
             for c in range(columns):
+                current_idx += 1
                 offset_x = -(r * (width + GAP))
                 offset_z = c * (height + GAP)
 
                 # Deckblatt platzieren (Direkt an Bierkasten, flache Hierarchie für besseren Export)
                 deck_pos = (offset_x, 0.0, offset_z)
+                
+                # Entscheidung: Sonerie oder Briefkasten?
+                if current_idx == sonerie_index:
+                    create_plate(
+                        f, body_ctx, "Sonerie Modul", None, None, None,
+                        bierkasten_lp, aggregate_parent=bierkasten,
+                        representation_maps=sonerie_maps,
+                        pos_offset=deck_pos
+                    )
+                    # Keine Einlagen für Sonerie
+                    continue
+
                 plate_deck = create_plate(
                     f,
                     body_ctx,
@@ -707,9 +761,6 @@ def generate_mailbox_ifc(
                     pos_offset=deck_pos
                 )
                 add_property_set(f, plate_deck, "Pset_ManufacturerTypeInformation", pset_data)
-                # WICHTIG: Stil auch auf die Instanz (MappedItem) des Wireframes anwenden
-                if len(plate_deck.Representation.Representations) > 1:
-                    assign_style_to_shape(f, plate_deck.Representation.Representations[1], edge_style)
 
                 # Einlagen platzieren
                 for idx, hole in enumerate(adjusted_holes, start=1):
@@ -727,9 +778,41 @@ def generate_mailbox_ifc(
                         pos_offset=insert_pos
                     )
                     add_property_set(f, plate_insert, "Pset_ManufacturerTypeInformation", pset_data)
-                    # WICHTIG: Stil auch auf die Instanz (MappedItem) des Wireframes anwenden
-                    if len(plate_insert.Representation.Representations) > 1:
-                        assign_style_to_shape(f, plate_insert.Representation.Representations[1], edge_style)
+
+        # --- Stützen (Freistehend) ---
+        if mounting_type.lower() == "freistehend":
+            # Stützen-Parameter
+            post_w = 0.04
+            post_d = 0.08
+            post_h = installation_height
+            
+            # Positionen (Links und Rechts vom Rahmen)
+            # Rahmen geht von 0 bis -total_width (in X)
+            # Wir platzieren Stützen zentriert zur Tiefe des Kastens (-depth/2)
+            # X-Pos: Rechts leicht versetzt (positiv), Links leicht versetzt (negativ)
+            
+            # Rechts
+            pos_right = (FRAME_OUTER_OFFSET + post_w/2, -depth/2, 0.0)
+            # Links
+            pos_left = (-total_width - FRAME_OUTER_OFFSET - post_w/2, -depth/2, 0.0)
+            
+            for pname, ppos in [("Stuetze_Rechts", pos_right), ("Stuetze_Links", pos_left)]:
+                # Profil
+                rect_prof = f.create_entity("IfcRectangleProfileDef", ProfileType="AREA", XDim=post_w, YDim=post_d)
+                # Extrusion (Z-Achse)
+                solid_post = f.create_entity("IfcExtrudedAreaSolid", 
+                    SweptArea=rect_prof, 
+                    Position=axis2placement3d(f, ppos), 
+                    ExtrudedDirection=create_direction(f, (0.0, 0.0, 1.0)), 
+                    Depth=post_h
+                )
+                shape_post = f.create_entity("IfcShapeRepresentation", body_ctx, "Body", "SweptSolid", [solid_post])
+                prod_shape_post = f.create_entity("IfcProductDefinitionShape", Representations=[shape_post])
+                
+                # Element (Column)
+                col = f.create_entity("IfcColumn", ifcopenshell.guid.new(), Name=pname, ObjectPlacement=f.create_entity("IfcLocalPlacement", storey.ObjectPlacement, axis2placement3d(f)), Representation=prod_shape_post)
+                assign_style_to_shape(f, shape_post, main_style)
+                f.create_entity("IfcRelContainedInSpatialStructure", ifcopenshell.guid.new(), RelatedElements=[col], RelatingStructure=storey)
 
         # Datei schreiben
         if output_path is None:
