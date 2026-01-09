@@ -19,14 +19,14 @@ DEFAULT_FARBE = "#C0C0C0"  # Farblos eloxiert / Grau
 
 @st.cache_data(show_spinner=False)
 def generate_and_convert_model(
-    width: float, height: float, depth: float, color: str, rows: int, columns: int
+    width: float, height: float, depth: float, color: str, rows: int, columns: int, edge_color: str
 ) -> Optional[Tuple[bytes, bytes]]:
     """
     Generiert ein IFC-Modell, konvertiert es nach GLB und gibt die GLB- und IFC-Daten als Bytes zurück.
     Streamlit's Caching verhindert die Neugenerierung bei gleichen Parametern.
     """
     ifc_path = generate_mailbox_ifc(
-        width=width, height=height, depth=depth, color=color, rows=rows, columns=columns
+        width=width, height=height, depth=depth, color=color, rows=rows, columns=columns, edge_color=edge_color
     )
     if not ifc_path:
         st.error("IFC-Datei konnte nicht erstellt werden.")
@@ -64,7 +64,17 @@ def generate_and_convert_model(
             if p and p.exists():
                 p.unlink()
 
-def get_model_viewer_html(data_url: str) -> str:
+def get_model_viewer_html(
+    data_url: str,
+    exposure: float = 1.0,
+    shadow_intensity: float = 1.5,
+    shadow_softness: float = 1.0,
+    tone_mapping: str = "neutral",
+    light_rotation: int = 0,
+    metallic_factor: float = 0.4,
+    roughness_factor: float = 0.3,
+    environment_image: str = "legacy",
+) -> str:
     """Erzeugt den HTML-Code für die <model-viewer>-Komponente."""
     return f"""
         <model-viewer
@@ -72,12 +82,19 @@ def get_model_viewer_html(data_url: str) -> str:
             camera-controls
             auto-rotate
             camera-orbit="180deg 75deg 105%"
-            shadow-intensity="2"
-            shadow-softness="0"
-            environment-image="neutral"
-            exposure="1.2"
-            background-color="#ffffff"
+            min-camera-orbit="auto auto 5%"
+            shadow-intensity="{shadow_intensity}"
+            shadow-softness="{shadow_softness}"
+            environment-image="{environment_image}"
+            environment-rotation="0deg {light_rotation}deg 0deg"
+            exposure="{exposure}"
+            tone-mapping="{tone_mapping}"
+            background-color="#eeeeee"
             style="width:100%; height:600px;">
+            <effect-composer render-mode="quality">
+                <outline-effect color="black" strength="1.0"></outline-effect>
+                <ssao-effect intensity="2.0" radius="0.1"></ssao-effect>
+            </effect-composer>
             <style>
               model-viewer {{
                 --poster-color: transparent;
@@ -86,6 +103,18 @@ def get_model_viewer_html(data_url: str) -> str:
         </model-viewer>
         <script type="module" 
                 src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js">
+        </script>
+        <script type="module" 
+                src="https://ajax.googleapis.com/ajax/libs/model-viewer-effects/1.5.0/model-viewer-effects.min.js">
+        </script>
+        <script>
+            const viewer = document.querySelector('model-viewer');
+            viewer.addEventListener('load', () => {{
+                for (const material of viewer.model.materials) {{
+                    material.pbrMetallicRoughness.setMetallicFactor({metallic_factor});
+                    material.pbrMetallicRoughness.setRoughnessFactor({roughness_factor});
+                }}
+            }});
         </script>
     """
 
@@ -99,6 +128,7 @@ if 'step' not in st.session_state:
     st.session_state.farbe = DEFAULT_FARBE
     st.session_state.rows = 1
     st.session_state.columns = 1
+    st.session_state.edge_color = "#000000" # Default Schwarz
 
 # --- Zentrale Modellgenerierung ---
 # Das Modell wird immer basierend auf dem aktuellen session_state generiert.
@@ -113,6 +143,7 @@ with st.spinner("Aktualisiere Modell..."):
         st.session_state.farbe,
         st.session_state.rows,
         st.session_state.columns,
+        st.session_state.edge_color,
     )
     if model_data:
         glb_bytes, ifc_bytes = model_data
@@ -203,12 +234,23 @@ with col2:
 with col1:
     st.subheader("3D-Ansicht")
 
+    with st.expander("🛠️ Viewer-Optionen (Experte)"):
+        exposure = st.slider("Belichtung (Exposure)", 0.0, 3.0, 1.0, 0.1)
+        shadow_intensity = st.slider("Schattenintensität", 0.0, 3.0, 1.5, 0.1)
+        shadow_softness = st.slider("Schattenweichheit", 0.0, 1.0, 1.0, 0.1)
+        light_rotation = st.slider("Lichtrichtung (Rotation)", 0, 360, 0, 15)
+        tone_mapping = st.selectbox("Tone Mapping", ["neutral", "aces", "agx"], index=0)
+        environment_image = st.selectbox("Environment Image", ["legacy", "neutral"], index=0)
+        metallic_factor = st.slider("Metallic Factor", 0.0, 1.0, 0.4, 0.05)
+        roughness_factor = st.slider("Roughness Factor", 0.0, 1.0, 0.3, 0.05)
+        st.session_state.edge_color = st.color_picker("Kantenfarbe (Wireframe)", st.session_state.edge_color)
+
     # Zeigt das Modell nur an, wenn es im Session State vorhanden ist
     if glb_bytes:
         b64 = base64.b64encode(glb_bytes).decode("ascii")
         data_url = f"data:model/gltf-binary;base64,{b64}"
 
-        viewer_html = get_model_viewer_html(data_url)
+        viewer_html = get_model_viewer_html(data_url, exposure, shadow_intensity, shadow_softness, tone_mapping, light_rotation, metallic_factor, roughness_factor, environment_image)
         st.components.v1.html(viewer_html, height=620)
     else:
         # Fallback, falls die Generierung fehlschlägt

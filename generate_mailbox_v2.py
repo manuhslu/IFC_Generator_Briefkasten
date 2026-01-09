@@ -163,11 +163,16 @@ def create_surface_style(f, name, rgb):
         Styles=[surface_style_rendering]
     )
 
+def create_curve_style(f, name, rgb):
+    """Erstellt einen IfcCurveStyle für Linien/Kanten."""
+    colour_rgb = f.create_entity("IfcColourRgb", None, *rgb)
+    return f.create_entity("IfcCurveStyle", Name=name, CurveColour=colour_rgb)
+
 def assign_style_to_shape(f, shape_rep, style):
-    """Weist den Style dem ersten Item der ShapeRepresentation zu."""
+    """Weist den Style allen Items der ShapeRepresentation zu."""
     if shape_rep and shape_rep.Items:
-        item = shape_rep.Items[0]
-        f.create_entity("IfcStyledItem", Item=item, Styles=[style], Name="StyleAssignment")
+        for item in shape_rep.Items:
+            f.create_entity("IfcStyledItem", Item=item, Styles=[style], Name="StyleAssignment")
 
 def add_property_set(f, product, pset_name, properties_dict):
     """Fügt einem Produkt ein PropertySet hinzu."""
@@ -277,16 +282,64 @@ def create_representation_map(f, representation):
     return f.create_entity("IfcRepresentationMap", MappingOrigin=origin, MappedRepresentation=representation)
 
 
-def create_mapped_item_shape(f, body_ctx, rep_map):
+def create_mapped_item_shape(f, body_ctx, rep_maps):
     """Erstellt ein ProductDefinitionShape, das ein IfcMappedItem enthält."""
-    # MappingTarget: Identity Transform (da wir IfcLocalPlacement nutzen)
-    op_origin = create_point(f, (0.0, 0.0, 0.0))
-    operator = f.create_entity("IfcCartesianTransformationOperator3D", LocalOrigin=op_origin)
+    # Falls nur eine Map übergeben wurde, in Liste packen
+    if not isinstance(rep_maps, list):
+        rep_maps = [rep_maps]
     
-    mapped_item = f.create_entity("IfcMappedItem", MappingSource=rep_map, MappingTarget=operator)
+    reps = []
+    for rm in rep_maps:
+        op_origin = create_point(f, (0.0, 0.0, 0.0))
+        operator = f.create_entity("IfcCartesianTransformationOperator3D", LocalOrigin=op_origin)
+        mapped_item = f.create_entity("IfcMappedItem", MappingSource=rm, MappingTarget=operator)
+        
+        # Jedes MappedItem bekommt eine eigene ShapeRepresentation
+        shape_rep = f.create_entity("IfcShapeRepresentation", ContextOfItems=body_ctx, RepresentationIdentifier="Body", RepresentationType="MappedRepresentation", Items=[mapped_item])
+        reps.append(shape_rep)
     
-    shape_rep = f.create_entity("IfcShapeRepresentation", ContextOfItems=body_ctx, RepresentationIdentifier="Body", RepresentationType="MappedRepresentation", Items=[mapped_item])
-    return f.create_entity("IfcProductDefinitionShape", Representations=[shape_rep])
+    return f.create_entity("IfcProductDefinitionShape", Representations=reps)
+
+
+def create_3d_wireframe(f, body_ctx, outer_points, thickness, inner_points_list=None):
+    """Erstellt eine Drahtgitter-Repräsentation (Kanten) für Extrusionen."""
+    items = []
+    
+    # Mapping: Profile(x,y) -> Object(x, -z), Extrusion -> Object(-y)
+    # Dies entspricht der Rotation im IfcExtrudedAreaSolid (Z=(0,1,0), X=(1,0,0))
+    def map_point(p, y):
+        return _listf((p[0], y, -p[1]))
+
+    def make_loop(points, y):
+        pts_3d = [f.create_entity("IfcCartesianPoint", map_point(p, y)) for p in points]
+        pts_3d.append(pts_3d[0]) # Loop schließen
+        return f.create_entity("IfcPolyline", Points=pts_3d)
+
+    def make_verticals(points, y_start, y_end):
+        lines = []
+        for p in points:
+            p1 = f.create_entity("IfcCartesianPoint", map_point(p, y_start))
+            p2 = f.create_entity("IfcCartesianPoint", map_point(p, y_end))
+            lines.append(f.create_entity("IfcPolyline", Points=[p1, p2]))
+        return lines
+
+    # Extrusion geht in negative Y-Richtung (im Objekt-System)
+    y_front = 0.0
+    y_back = -float(thickness)
+
+    # Außenkontur
+    items.append(make_loop(outer_points, y_front))
+    items.append(make_loop(outer_points, y_back))
+    items.extend(make_verticals(outer_points, y_front, y_back))
+
+    # Innenkonturen (Löcher)
+    if inner_points_list:
+        for ip in inner_points_list:
+            items.append(make_loop(ip, y_front))
+            items.append(make_loop(ip, y_back))
+            items.extend(make_verticals(ip, y_front, y_back))
+
+    return f.create_entity("IfcShapeRepresentation", body_ctx, "Body", "GeometricCurveSet", Items=items)
 
 
 def create_plate(
@@ -301,13 +354,13 @@ def create_plate(
     aggregate_parent=None,
     representation=None,
     product_def_shape=None, # Neu: Für Instancing
-    representation_map=None, # Neu: Für MappedItem Instancing (besser für GLB)
+    representation_maps=None, # Neu: Liste von Maps (Solid + Wireframe)
     arc_indices=None,
     pos_offset=(0.0, 0.0, 0.0) # Neu: Offset zur Vermeidung von Z-Fighting
 ):
     # Geometrie-Handling: Entweder existierende Shape nutzen (Instancing) oder neu erstellen
-    if representation_map:
-        prod_shape = create_mapped_item_shape(f, body_ctx, representation_map)
+    if representation_maps:
+        prod_shape = create_mapped_item_shape(f, body_ctx, representation_maps)
     elif product_def_shape:
         prod_shape = product_def_shape
     elif representation:
@@ -316,7 +369,10 @@ def create_plate(
         # Fallback: Geometrie neu erstellen
         use_arcs = arc_indices if arc_indices is not None else ARC_INDICES
         shape_rep = create_extruded_shape(f, body_ctx, outer_points, inner_curves, thickness, use_arcs)
-        prod_shape = f.create_entity("IfcProductDefinitionShape", Representations=[shape_rep])
+        
+        # Wireframe dazu generieren (wenn Punkte vorhanden)
+        wireframe_rep = create_3d_wireframe(f, body_ctx, outer_points, thickness, []) # Keine inner_points hier verfügbar/geparst
+        prod_shape = f.create_entity("IfcProductDefinitionShape", Representations=[shape_rep, wireframe_rep])
 
     # Placement mit Offset
     loc = f.create_entity(
@@ -385,7 +441,10 @@ def create_frame(
         float(depth),
     )
     shape_rep = f.create_entity("IfcShapeRepresentation", body_ctx, "Body", "SweptSolid", [solid])
-    prod_shape = f.create_entity("IfcProductDefinitionShape", None, None, [shape_rep])
+    
+    # Wireframe hinzufügen
+    wireframe_rep = create_3d_wireframe(f, body_ctx, outer_points, depth, [inner_points])
+    prod_shape = f.create_entity("IfcProductDefinitionShape", None, None, [shape_rep, wireframe_rep])
 
     loc = f.create_entity(
         "IfcLocalPlacement",
@@ -435,6 +494,7 @@ def generate_mailbox_ifc(
     columns: int = 1,
     output_path: Optional[Path] = None,
     color: str = "#C72727",  # Default: Farblos eloxiert / Grau
+    edge_color: str = "#000000", # Default: Schwarz
 ) -> Optional[Path]:
     rows = max(1, min(rows, 5))
     columns = max(1, min(columns, 3))
@@ -482,6 +542,10 @@ def generate_mailbox_ifc(
         rgb_color = hex_to_rgb(color)
         main_style = create_surface_style(f, f"Style_{color}", rgb_color)
 
+        # Stil für Kanten: Dynamisch aus Parameter
+        edge_rgb = hex_to_rgb(edge_color)
+        edge_style = create_curve_style(f, "Style_Edges", edge_rgb)
+
         # --- Property Set Daten vorbereiten ---
         color_name = get_color_name(color)
         pset_data = MANUFACTURER_INFO.copy()
@@ -526,13 +590,57 @@ def generate_mailbox_ifc(
         
         # Style und Pset auf Rahmen anwenden
         assign_style_to_shape(f, frame_element.Representation.Representations[0], main_style)
+        if len(frame_element.Representation.Representations) > 1:
+            assign_style_to_shape(f, frame_element.Representation.Representations[1], edge_style)
         add_property_set(f, frame_element, "Pset_ManufacturerTypeInformation", pset_data)
+
+        # --- Rückwand erzeugen ---
+        # 2mm Blech, 1mm kleiner als innerer Rahmen, Position bei depth - 0.01m
+        back_panel_points = inset_rectangle(frame_inner, 0.001)
+        back_panel_pos = (0.0, -depth + 0.01, 0.0)
+        
+        back_panel = create_plate(
+            f,
+            body_ctx,
+            "Rueckwand",
+            back_panel_points,
+            [], # Keine Löcher
+            0.002, # 2mm Dicke
+            bierkasten_frame_lp,
+            aggregate_parent=bierkasten_frame,
+            pos_offset=back_panel_pos
+        )
+        # create_plate erstellt jetzt automatisch Wireframe, wenn keine Map übergeben wird
+        assign_style_to_shape(f, back_panel.Representation.Representations[0], main_style)
+        if len(back_panel.Representation.Representations) > 1:
+            assign_style_to_shape(f, back_panel.Representation.Representations[1], edge_style)
+        add_property_set(f, back_panel, "Pset_ManufacturerTypeInformation", pset_data)
 
         # --- VORBEREITUNG: Geometrien einmalig erstellen (Instancing) ---
         
+        # Anpassung der Löcher/Einlagen an die neue Höhe (Abstand von oben fixieren)
+        dy = height - BASE_HEIGHT
+        adjusted_holes = []
+        for h in HOLES:
+            if h["name"] == "Einwurfklappe":
+                xs = [p[0] for p in h["points"]]
+                min_x = min(xs)
+                new_points = []
+                for p in h["points"]:
+                    # Startpunkt (links) bleibt fix, Endpunkt (rechts) wandert mit der Breite
+                    if abs(p[0] - min_x) < 1e-5:
+                        nx = p[0]
+                    else:
+                        nx = width - (BASE_WIDTH - p[0])
+                    new_points.append((nx, p[1] + dy))
+            else:
+                # Andere Einlagen bleiben in der Breite/Position fix
+                new_points = [(p[0], p[1] + dy) for p in h["points"]]
+            adjusted_holes.append({"name": h["name"], "points": new_points})
+
         # 1. Deckblatt-Geometrie (Shared ProductDefinitionShape)
         hole_curves = []
-        for h in HOLES:
+        for h in adjusted_holes:
             hole_curves.append(
                 create_indexed_polycurve(
                     f,
@@ -547,8 +655,14 @@ def generate_mailbox_ifc(
         )
         assign_style_to_shape(f, shape_deckblatt_rep, main_style)
         
-        # Erstelle RepresentationMap (für echtes Instancing via IfcMappedItem)
+        # Wireframe für Deckblatt erstellen (inkl. Löcher)
+        deck_holes_points = [h["points"] for h in adjusted_holes]
+        shape_deckblatt_wireframe = create_3d_wireframe(f, body_ctx, scaled_outer_single, PLATE_THICKNESS, deck_holes_points)
+        assign_style_to_shape(f, shape_deckblatt_wireframe, edge_style)
+        
+        # Maps erstellen (Solid und Wireframe separat)
         deck_map = create_representation_map(f, shape_deckblatt_rep)
+        deck_wireframe_map = create_representation_map(f, shape_deckblatt_wireframe)
 
         # 2. Einlagen-Geometrien (Maps)
         insert_maps = {}
@@ -559,16 +673,20 @@ def generate_mailbox_ifc(
             3: "Einwurfklappe",
         }
         
-        for idx, hole in enumerate(HOLES, start=1):
+        for idx, hole in enumerate(adjusted_holes, start=1):
             shrunk_hole = inset_rectangle(hole["points"], inset_offset)
             # Wichtig: arc_indices=[] übergeben, da Einlagen rechteckig sind
             shape_rep = create_extruded_shape(f, body_ctx, shrunk_hole, [], PLATE_THICKNESS, arc_indices=[])
             
+            # Wireframe für Einlage
+            shape_wireframe = create_3d_wireframe(f, body_ctx, shrunk_hole, PLATE_THICKNESS)
+            assign_style_to_shape(f, shape_wireframe, edge_style)
+            
             if idx == 3: # Einwurfklappe bekommt auch die Farbe
                 assign_style_to_shape(f, shape_rep, main_style)
             
-            # Map erstellen
-            insert_maps[idx] = create_representation_map(f, shape_rep)
+            # Maps speichern (Liste: [Solid, Wireframe])
+            insert_maps[idx] = [create_representation_map(f, shape_rep), create_representation_map(f, shape_wireframe)]
 
         # Raster an Platten (Deckblatt + Einlagen) erzeugen
         for r in range(rows):
@@ -585,13 +703,16 @@ def generate_mailbox_ifc(
                     None, None, None, # Keine Geometrie-Daten nötig
                     bierkasten_lp,
                     aggregate_parent=bierkasten,
-                    representation_map=deck_map, # MappedItem Instancing
+                    representation_maps=[deck_map, deck_wireframe_map], # MappedItem Instancing (Solid + Wireframe)
                     pos_offset=deck_pos
                 )
                 add_property_set(f, plate_deck, "Pset_ManufacturerTypeInformation", pset_data)
+                # WICHTIG: Stil auch auf die Instanz (MappedItem) des Wireframes anwenden
+                if len(plate_deck.Representation.Representations) > 1:
+                    assign_style_to_shape(f, plate_deck.Representation.Representations[1], edge_style)
 
                 # Einlagen platzieren
-                for idx, hole in enumerate(HOLES, start=1):
+                for idx, hole in enumerate(adjusted_holes, start=1):
                     # Offset hinzufügen (Z-Fighting) + Grid Position
                     insert_pos = (offset_x, 0.0, offset_z + 0.0005)
 
@@ -602,10 +723,13 @@ def generate_mailbox_ifc(
                         None, None, None,
                         bierkasten_lp,
                         aggregate_parent=bierkasten,
-                        representation_map=insert_maps[idx],
+                        representation_maps=insert_maps[idx], # Ist bereits eine Liste [Solid, Wireframe]
                         pos_offset=insert_pos
                     )
                     add_property_set(f, plate_insert, "Pset_ManufacturerTypeInformation", pset_data)
+                    # WICHTIG: Stil auch auf die Instanz (MappedItem) des Wireframes anwenden
+                    if len(plate_insert.Representation.Representations) > 1:
+                        assign_style_to_shape(f, plate_insert.Representation.Representations[1], edge_style)
 
         # Datei schreiben
         if output_path is None:
