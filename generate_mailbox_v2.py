@@ -10,6 +10,7 @@ Parametrische Briefkasten-Generierung als IFC:
 import tempfile
 from pathlib import Path
 from typing import Optional
+import math
 
 import ifcopenshell
 import ifcopenshell.guid
@@ -25,14 +26,18 @@ ARC_INDICES = []  # Keine Bögen mehr
 BASE_WIDTH = max(p[0] for p in BASE_OUTER_POINTS) - min(p[0] for p in BASE_OUTER_POINTS)  # 0.409
 BASE_HEIGHT = max(p[1] for p in BASE_OUTER_POINTS) - min(p[1] for p in BASE_OUTER_POINTS)  # 0.3115
 
+NAMEPLATE_WIDTH = 0.10
+NAMEPLATE_HEIGHT = 0.03
+
 HOLES = [
     {
         "name": "Schild Keine Werbung",
-        "points": [(0.017, 0.1809), (0.017, 0.1957), (0.0973, 0.1957), (0.0973, 0.1809)],
+        # Angepasst auf Standardgroesse, Position leicht angepasst
+        "points": [(0.02, 0.18), (0.02, 0.18 + NAMEPLATE_HEIGHT), (0.02 + NAMEPLATE_WIDTH, 0.18 + NAMEPLATE_HEIGHT), (0.02 + NAMEPLATE_WIDTH, 0.18)],
     },
     {
         "name": "Schild Beschriftung",
-        "points": [(0.017, 0.2057), (0.017, 0.231), (0.0973, 0.231), (0.0973, 0.2057)],
+        "points": [(0.02, 0.22), (0.02, 0.22 + NAMEPLATE_HEIGHT), (0.02 + NAMEPLATE_WIDTH, 0.22 + NAMEPLATE_HEIGHT), (0.02 + NAMEPLATE_WIDTH, 0.22)],
     },
     {
         "name": "Einwurfklappe",
@@ -71,6 +76,7 @@ RAL_COLORS_MAP = {
 
 def _listf(vals):
     return [float(x) for x in vals]
+
 
 def create_direction(f, xyz):
     return f.create_entity("IfcDirection", _listf(xyz))
@@ -132,6 +138,62 @@ def inset_rectangle(points, offset):
         (xmax - offset, ymin + offset),
     ]
 
+def create_circle_points(center, radius, num_segments=16):
+    """Erzeugt Punkte fuer einen Kreis (fuer Buttons)."""
+    cx, cy = center
+    points = []
+    for i in range(num_segments):
+        angle = 2 * math.pi * i / num_segments
+        points.append((cx + math.cos(angle) * radius, cy + math.sin(angle) * radius))
+    return points
+
+def get_sonerie_holes(width, height, total_boxes):
+    """
+    Berechnet die Positionen fuer Namensschilder und Klingelknoepfe auf dem Sonerie-Panel.
+    """
+    holes = []
+    # Wir nehmen an, dass die Sonerie selbst einen Slot belegt, also brauchen wir Knoepfe fuer (total - 1)
+    # Wenn total_boxes == 1, ist es nur die Sonerie (z.B. Kamera), evtl. 1 Klingel.
+    num_apartments = max(1, total_boxes - 1)
+    
+    start_y = height - 0.06  # Start oben mit Rand
+    gap_y = 0.02
+    step_y = NAMEPLATE_HEIGHT + gap_y
+    
+    # Spalten-Logik
+    col1_x = 0.04
+    # Falls wir zwei Spalten brauchen (wenn es vertikal nicht reicht)
+    # Einfache Heuristik: Wenn mehr als X Parteien, 2 Spalten. 
+    # Oder checken ob y < margin.
+    
+    current_y = start_y
+    current_col = 1
+    
+    for i in range(num_apartments):
+        if current_y < 0.05: # Zu weit unten, neue Spalte
+            current_col = 2
+            current_y = start_y
+        
+        if current_col == 1:
+            plate_x = col1_x
+            btn_x = plate_x + NAMEPLATE_WIDTH + 0.03
+        else:
+            plate_x = width - col1_x - NAMEPLATE_WIDTH
+            btn_x = plate_x - 0.03
+            
+        # Namensschild (Rechteck)
+        rect_pts = [(plate_x, current_y), (plate_x, current_y + NAMEPLATE_HEIGHT), (plate_x + NAMEPLATE_WIDTH, current_y + NAMEPLATE_HEIGHT), (plate_x + NAMEPLATE_WIDTH, current_y)]
+        holes.append({"name": f"Sonerie_Name_{i}", "points": rect_pts, "type": "rect"})
+        
+        # Knopf (Kreis)
+        radius = 0.0075
+        center = (btn_x, current_y + NAMEPLATE_HEIGHT/2)
+        circle_pts = create_circle_points(center, radius) # 1.5cm Durchmesser
+        holes.append({"name": f"Sonerie_Btn_{i}", "points": circle_pts, "type": "circle", "center": center, "radius": radius})
+        
+        current_y -= step_y
+        
+    return holes
 
 # ------------------ Styling & Properties Helfer ------------------
 
@@ -478,43 +540,6 @@ def create_frame(
     return frame
 
 
-def make_sonerie_csg(f, body_ctx, width, height, thickness, style, details=None):
-    """
-    Erstellt die Geometrie für ein Sonerie-Modul (Klingel/Kamera).
-    Gibt eine Liste von RepresentationMaps zurück [Solid, Wireframe].
-    """
-    # Basis-Profil skalieren
-    sx = width / BASE_WIDTH
-    sy = height / BASE_HEIGHT
-    outer = scale_profile(BASE_OUTER_POINTS, sx, sy)
-    
-    # Standard-Löcher für Kamera/Lautsprecher, falls keine Details übergeben
-    holes_def = [
-        {"points": [(0.18, 0.22), (0.18, 0.26), (0.22, 0.26), (0.22, 0.22)]}, # Kamera
-        {"points": [(0.10, 0.10), (0.10, 0.18), (0.30, 0.18), (0.30, 0.10)]}, # Lautsprecher
-    ]
-    
-    # Hier könnte man 'details' auswerten, um Positionen anzupassen
-    
-    hole_curves = []
-    hole_points_list = []
-    
-    for h in holes_def:
-        # Skalieren
-        sp = scale_profile(h["points"], sx, sy)
-        hole_points_list.append(sp)
-        hole_curves.append(create_indexed_polycurve(f, sp, closed=True))
-        
-    # Solid erstellen
-    shape_rep = create_extruded_shape(f, body_ctx, outer, hole_curves, thickness, arc_indices=ARC_INDICES)
-    assign_style_to_shape(f, shape_rep, style)
-    
-    # Wireframe erstellen
-    shape_wire = create_3d_wireframe(f, body_ctx, outer, thickness, hole_points_list)
-    
-    return [create_representation_map(f, shape_rep), create_representation_map(f, shape_wire)]
-
-
 # ------------------ Hauptgenerator ------------------
 
 def generate_mailbox_ifc(
@@ -524,11 +549,9 @@ def generate_mailbox_ifc(
     rows: int = 1,
     columns: int = 1,
     output_path: Optional[Path] = None,
-    color: str = "#C72727",  # Default: Farblos eloxiert / Grau
-    mounting_type: str = "Wand",
-    installation_height: float = 1.5,
-    sonerie_index: int = -1,
-    sonerie_details: Optional[dict] = None,
+    color: str = "#C0C0C0",  # Default: Farblos eloxiert
+    mounting_type: str = "Wandmontage",
+    sonerie_active: bool = False,
 ) -> Optional[Path]:
     rows = max(1, min(rows, 5))
     columns = max(1, min(columns, 3))
@@ -537,7 +560,19 @@ def generate_mailbox_ifc(
         f, body_ctx, storey = create_project_hierarchy()
 
         # Haupt-Furnishing "Bierkasten"
+        # Hoehenberechnung fuer Freistehend
+        elevation_z = 0.0
+        total_height_box = columns * height + (columns - 1) * GAP
+        
+        if mounting_type == "Freistehend":
+            target_top_edge = 1.35
+            elevation_z = max(0.0, target_top_edge - total_height_box)
+        
+        # Placement mit Elevation
+        placement_origin = (0.0, 0.0, elevation_z)
         bierkasten_lp = f.create_entity("IfcLocalPlacement", storey.ObjectPlacement, axis2placement3d(f))
+        bierkasten_lp.RelativePlacement = axis2placement3d(f, placement_origin)
+        
         bierkasten = f.create_entity(
             "IfcFurnishingElement",
             GlobalId=ifcopenshell.guid.new(),
@@ -556,6 +591,8 @@ def generate_mailbox_ifc(
 
         # Zweites Furnishing nur für den Rahmen
         bierkasten_frame_lp = f.create_entity("IfcLocalPlacement", storey.ObjectPlacement, axis2placement3d(f))
+        bierkasten_frame_lp.RelativePlacement = axis2placement3d(f, placement_origin)
+        
         bierkasten_frame = f.create_entity(
             "IfcFurnishingElement",
             GlobalId=ifcopenshell.guid.new(),
@@ -575,10 +612,14 @@ def generate_mailbox_ifc(
         # --- Styling vorbereiten ---
         rgb_color = hex_to_rgb(color)
         main_style = create_surface_style(f, f"Style_{color}", rgb_color)
-        
-        # Style für Sonerie (Dunkler/Kontrast)
-        sonerie_rgb = (0.2, 0.2, 0.2) # Dunkelgrau
-        sonerie_style = create_surface_style(f, "Style_Sonerie", sonerie_rgb)
+
+        # Standard Style für Einlagen (immer Farblos eloxiert)
+        farblos_hex = "#C0C0C0"
+        if color.upper() == farblos_hex:
+            standard_style = main_style
+        else:
+            standard_rgb = hex_to_rgb(farblos_hex)
+            standard_style = create_surface_style(f, "Style_Farblos_eloxiert", standard_rgb)
 
         # --- Property Set Daten vorbereiten ---
         color_name = get_color_name(color)
@@ -593,10 +634,6 @@ def generate_mailbox_ifc(
         # Frame über das gesamte Raster
         total_width = rows * width + (rows - 1) * GAP
         total_height = columns * height + (columns - 1) * GAP
-        
-        # Höhenberechnung (Oberkante = installation_height)
-        elevation_z = max(0.0, installation_height - total_height)
-        
         sx_total = total_width / BASE_WIDTH
         sy_total = total_height / BASE_HEIGHT
         frame_outer = scale_profile(BASE_OUTER_POINTS, sx_total, sy_total)
@@ -613,11 +650,6 @@ def generate_mailbox_ifc(
             (xmax + FRAME_INNER_OFFSET, ymax + FRAME_INNER_OFFSET),
             (xmax + FRAME_INNER_OFFSET, ymin - FRAME_INNER_OFFSET),
         ]
-
-        # Update LocalPlacement für Container (Elevation anwenden)
-        elev_placement = axis2placement3d(f, (0.0, 0.0, elevation_z))
-        bierkasten_lp.RelativePlacement = elev_placement
-        bierkasten_frame_lp.RelativePlacement = elev_placement
 
         # Rahmen erzeugen (nur im zweiten Furnishing, nicht mehr doppelt)
         frame_element = create_frame(
@@ -677,6 +709,52 @@ def generate_mailbox_ifc(
                 new_points = [(p[0], p[1] + dy) for p in h["points"]]
             adjusted_holes.append({"name": h["name"], "points": new_points})
 
+        # --- Sonerie Geometrie vorbereiten ---
+        sonerie_maps = None
+        sonerie_inlays_data = []
+        sonerie_double_height = False
+        
+        if sonerie_active:
+            # Check ob Sonerie doppelte Höhe braucht (bei vielen Parteien, z.B. 4x3=12, 5x3=15)
+            if rows * columns >= 12 and columns >= 2:
+                sonerie_double_height = True
+            
+            sonerie_h = (2 * height + GAP) if sonerie_double_height else height
+            
+            # Profil für Sonerie skalieren (ggf. doppelte Höhe)
+            sx_sonerie = width / BASE_WIDTH
+            sy_sonerie = sonerie_h / BASE_HEIGHT
+            scaled_outer_sonerie = scale_profile(BASE_OUTER_POINTS, sx_sonerie, sy_sonerie)
+            
+            sonerie_holes_data = get_sonerie_holes(width, sonerie_h, rows * columns)
+            sonerie_curves = [create_indexed_polycurve(f, h["points"], closed=True) for h in sonerie_holes_data]
+            
+            # Solid
+            sonerie_rep = create_extruded_shape(f, body_ctx, scaled_outer_sonerie, sonerie_curves, PLATE_THICKNESS, arc_indices=ARC_INDICES)
+            assign_style_to_shape(f, sonerie_rep, main_style) # Gleiche Farbe wie Kasten
+            
+            # Wireframe
+            sonerie_wf_pts = [h["points"] for h in sonerie_holes_data]
+            sonerie_wf = create_3d_wireframe(f, body_ctx, scaled_outer_sonerie, PLATE_THICKNESS, sonerie_wf_pts)
+            
+            sonerie_maps = [create_representation_map(f, sonerie_rep), create_representation_map(f, sonerie_wf)]
+            
+            # Einlagen für Sonerie (Namensschilder + Knöpfe)
+            for h in sonerie_holes_data:
+                if h["type"] == "rect":
+                    pts = inset_rectangle(h["points"], 0.001)
+                elif h["type"] == "circle":
+                    pts = create_circle_points(h["center"], h["radius"] - 0.001)
+                else:
+                    continue
+                
+                inlay_rep = create_extruded_shape(f, body_ctx, pts, [], PLATE_THICKNESS, arc_indices=[])
+                assign_style_to_shape(f, inlay_rep, standard_style)
+                inlay_wf = create_3d_wireframe(f, body_ctx, pts, PLATE_THICKNESS)
+                
+                maps = [create_representation_map(f, inlay_rep), create_representation_map(f, inlay_wf)]
+                sonerie_inlays_data.append({"name": h["name"] + "_Inlay", "maps": maps})
+
         # 1. Deckblatt-Geometrie (Shared ProductDefinitionShape)
         hole_curves = []
         for h in adjusted_holes:
@@ -724,32 +802,40 @@ def generate_mailbox_ifc(
             
             # Maps speichern (Liste: [Solid, Wireframe])
             insert_maps[idx] = [create_representation_map(f, shape_rep), create_representation_map(f, shape_wireframe)]
-            
-        # 3. Sonerie-Geometrie (Maps)
-        sonerie_maps = make_sonerie_csg(f, body_ctx, width, height, PLATE_THICKNESS, sonerie_style, sonerie_details)
 
         # Raster an Platten (Deckblatt + Einlagen) erzeugen
-        current_idx = 0
         for r in range(rows):
             for c in range(columns):
-                current_idx += 1
                 offset_x = -(r * (width + GAP))
                 offset_z = c * (height + GAP)
 
-                # Deckblatt platzieren (Direkt an Bierkasten, flache Hierarchie für besseren Export)
-                deck_pos = (offset_x, 0.0, offset_z)
-                
-                # Entscheidung: Sonerie oder Briefkasten?
-                if current_idx == sonerie_index:
+                # Check Sonerie Position (Unten Links: r=0, c=0)
+                if sonerie_active and r == 0 and c == 0:
+                    sonerie_pos = (offset_x, 0.0, offset_z)
                     create_plate(
                         f, body_ctx, "Sonerie Modul", None, None, None,
                         bierkasten_lp, aggregate_parent=bierkasten,
                         representation_maps=sonerie_maps,
-                        pos_offset=deck_pos
+                        pos_offset=sonerie_pos
                     )
-                    # Keine Einlagen für Sonerie
+                    
+                    # Einlagen platzieren
+                    for inlay in sonerie_inlays_data:
+                        create_plate(
+                            f, body_ctx, inlay["name"], None, None, None,
+                            bierkasten_lp, aggregate_parent=bierkasten,
+                            representation_maps=inlay["maps"],
+                            pos_offset=sonerie_pos
+                        )
+                    # Keine Einlagen fuer Sonerie
+                    continue
+                
+                # Wenn Sonerie doppelte Höhe hat, muss das Feld darüber (r=0, c=1) übersprungen werden
+                if sonerie_active and sonerie_double_height and r == 0 and c == 1:
                     continue
 
+                # Deckblatt platzieren (Direkt an Bierkasten, flache Hierarchie für besseren Export)
+                deck_pos = (offset_x, 0.0, offset_z)
                 plate_deck = create_plate(
                     f,
                     body_ctx,
@@ -779,40 +865,38 @@ def generate_mailbox_ifc(
                     )
                     add_property_set(f, plate_insert, "Pset_ManufacturerTypeInformation", pset_data)
 
-        # --- Stützen (Freistehend) ---
-        if mounting_type.lower() == "freistehend":
-            # Stützen-Parameter
+        # --- Stuetzen fuer Freistehend ---
+        if mounting_type == "Freistehend":
             post_w = 0.04
             post_d = 0.08
-            post_h = installation_height
+            post_h = elevation_z + total_height_box # Gesamthoehe bis Oberkante
             
-            # Positionen (Links und Rechts vom Rahmen)
-            # Rahmen geht von 0 bis -total_width (in X)
-            # Wir platzieren Stützen zentriert zur Tiefe des Kastens (-depth/2)
-            # X-Pos: Rechts leicht versetzt (positiv), Links leicht versetzt (negativ)
+            # Positionierung:
+            # Boxen wachsen nach -X.
+            # Rechts (Start): X > width. Links (Ende): X < -(rows-1)*(width+GAP)
+            # Der Rahmen erweitert die Breite um FRAME_OUTER_OFFSET auf beiden Seiten.
             
-            # Rechts
-            pos_right = (FRAME_OUTER_OFFSET + post_w/2, -depth/2, 0.0)
-            # Links
-            pos_left = (-total_width - FRAME_OUTER_OFFSET - post_w/2, -depth/2, 0.0)
+            # Rechter Pfosten (Global X > 0)
+            pos_right_x = FRAME_OUTER_OFFSET + post_w/2
+            pos_right = (pos_right_x, -depth/2, 0.0)
             
-            for pname, ppos in [("Stuetze_Rechts", pos_right), ("Stuetze_Links", pos_left)]:
-                # Profil
-                rect_prof = f.create_entity("IfcRectangleProfileDef", ProfileType="AREA", XDim=post_w, YDim=post_d)
-                # Extrusion (Z-Achse)
-                solid_post = f.create_entity("IfcExtrudedAreaSolid", 
-                    SweptArea=rect_prof, 
-                    Position=axis2placement3d(f, ppos), 
-                    ExtrudedDirection=create_direction(f, (0.0, 0.0, 1.0)), 
-                    Depth=post_h
-                )
-                shape_post = f.create_entity("IfcShapeRepresentation", body_ctx, "Body", "SweptSolid", [solid_post])
-                prod_shape_post = f.create_entity("IfcProductDefinitionShape", Representations=[shape_post])
+            # Linker Pfosten (Global X < -total_width)
+            pos_left_x = -(total_width + FRAME_OUTER_OFFSET) - post_w/2
+            pos_left = (pos_left_x, -depth/2, 0.0)
+            
+            post_profile = f.create_entity("IfcRectangleProfileDef", "AREA", None, axis2placement2d(f), post_w, post_d)
+            
+            for pname, ppos in [("Stuetze Rechts", pos_right), ("Stuetze Links", pos_left)]:
+                # Pfosten Extrusion
+                post_solid = f.create_entity("IfcExtrudedAreaSolid", post_profile, axis2placement3d(f, ppos), create_direction(f, (0.0, 0.0, 1.0)), post_h)
+                post_rep = f.create_entity("IfcShapeRepresentation", body_ctx, "Body", "SweptSolid", [post_solid])
+                post_shape = f.create_entity("IfcProductDefinitionShape", Representations=[post_rep])
                 
-                # Element (Column)
-                col = f.create_entity("IfcColumn", ifcopenshell.guid.new(), Name=pname, ObjectPlacement=f.create_entity("IfcLocalPlacement", storey.ObjectPlacement, axis2placement3d(f)), Representation=prod_shape_post)
-                assign_style_to_shape(f, shape_post, main_style)
-                f.create_entity("IfcRelContainedInSpatialStructure", ifcopenshell.guid.new(), RelatedElements=[col], RelatingStructure=storey)
+                post_obj = f.create_entity("IfcColumn", ifcopenshell.guid.new(), Name=pname, ObjectPlacement=f.create_entity("IfcLocalPlacement", storey.ObjectPlacement, axis2placement3d(f)), Representation=post_shape)
+                
+                assign_style_to_shape(f, post_rep, main_style)
+                f.create_entity("IfcRelContainedInSpatialStructure", ifcopenshell.guid.new(), RelatedElements=[post_obj], RelatingStructure=storey)
+
 
         # Datei schreiben
         if output_path is None:
@@ -834,6 +918,13 @@ if __name__ == "__main__":
         print(f"IFC erstellt: {out1}")
     # 3x5 (max rows/cols), entspricht Name 5x3 in der Benennung
     # Test mit Farbe Grasgrün (#4D6F39)
-    out2 = generate_mailbox_ifc(rows=5, columns=3, color="#4D6F39", output_path=Path("test_generate_mailbox_5x3.ifc"))
+    out2 = generate_mailbox_ifc(
+        rows=5, 
+        columns=3, 
+        color="#4D6F39", 
+        output_path=Path("test_generate_mailbox_5x3.ifc"),
+        mounting_type="Freistehend",
+        sonerie_active=True
+    )
     if out2:
         print(f"IFC erstellt: {out2}")

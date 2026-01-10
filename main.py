@@ -19,14 +19,14 @@ DEFAULT_FARBE = "#C0C0C0"  # Farblos eloxiert / Grau
 
 @st.cache_data(show_spinner=False)
 def generate_and_convert_model(
-    width: float, height: float, depth: float, color: str, rows: int, columns: int
+    width: float, height: float, depth: float, color: str, rows: int, columns: int, mounting_type: str, sonerie_active: bool
 ) -> Optional[Tuple[bytes, bytes]]:
     """
     Generiert ein IFC-Modell, konvertiert es nach GLB und gibt die GLB- und IFC-Daten als Bytes zurück.
     Streamlit's Caching verhindert die Neugenerierung bei gleichen Parametern.
     """
     ifc_path = generate_mailbox_ifc(
-        width=width, height=height, depth=depth, color=color, rows=rows, columns=columns
+        width=width, height=height, depth=depth, color=color, rows=rows, columns=columns, mounting_type=mounting_type, sonerie_active=sonerie_active
     )
     if not ifc_path:
         st.error("IFC-Datei konnte nicht erstellt werden.")
@@ -121,11 +121,11 @@ def get_model_viewer_html(
 
 # --- Session State Initialisierung ---
 if 'breite' not in st.session_state:
-    st.session_state.breite = DEFAULT_BREITE
+    st.session_state.breite = 0.409 # Default Querformat
 if 'hoehe' not in st.session_state:
-    st.session_state.hoehe = DEFAULT_HOEHE
+    st.session_state.hoehe = 0.312 # Default Querformat
 if 'tiefe' not in st.session_state:
-    st.session_state.tiefe = DEFAULT_TIEFE
+    st.session_state.tiefe = 0.355 # Default Querformat
 if 'farbe' not in st.session_state:
     st.session_state.farbe = DEFAULT_FARBE
 if 'rows' not in st.session_state:
@@ -134,10 +134,20 @@ if 'columns' not in st.session_state:
     st.session_state.columns = 1
 if 'mounting_type' not in st.session_state:
     st.session_state.mounting_type = "Wandmontage"
-if 'sonerie_active' not in st.session_state:
-    st.session_state.sonerie_active = False
+if 'sonerie_mode' not in st.session_state:
+    st.session_state.sonerie_mode = "Nein"
 if 'format_selection' not in st.session_state:
-    st.session_state.format_selection = "Benutzerdefiniert"
+    st.session_state.format_selection = "Querformat"
+
+# --- Validierung gegen veraltete Session-State-Werte ---
+# Verhindert Fehler, wenn noch alte Werte (z.B. "Wand" oder False) im Cache liegen
+valid_mounting = ["Wandmontage", "Freistehend"]
+if st.session_state.mounting_type not in valid_mounting:
+    st.session_state.mounting_type = valid_mounting[0]
+
+valid_sonerie = ["Nein", "Ja"]
+if st.session_state.sonerie_mode not in valid_sonerie:
+    st.session_state.sonerie_mode = valid_sonerie[0]
 
 # --- Zentrale Modellgenerierung ---
 # Das Modell wird immer basierend auf dem aktuellen session_state generiert.
@@ -152,6 +162,8 @@ with st.spinner("Aktualisiere Modell..."):
         st.session_state.farbe,
         st.session_state.rows,
         st.session_state.columns,
+        st.session_state.mounting_type,
+        st.session_state.sonerie_mode == "Ja",
     )
     if model_data:
         glb_bytes, ifc_bytes = model_data
@@ -205,13 +217,13 @@ with col2:
         ["Querformat", "Hochformat", "Benutzerdefiniert"], 
         key="format_selection", 
         on_change=update_dims,
-        horizontal=True
+        horizontal=False
     )
 
     if st.session_state.format_selection == "Benutzerdefiniert":
-        st.session_state.breite = st.slider("Breite [m]", 0.2, 1.0, st.session_state.breite, 0.05)
-        st.session_state.hoehe = st.slider("Höhe [m]", 0.2, 1.0, st.session_state.hoehe, 0.05)
-        st.session_state.tiefe = st.slider("Tiefe [m]", 0.1, 0.5, st.session_state.tiefe, 0.05)
+        st.slider("Breite [m]", 0.2, 1.0, key="breite", step=0.05)
+        st.slider("Höhe [m]", 0.2, 1.0, key="hoehe", step=0.05)
+        st.slider("Tiefe [m]", 0.1, 0.5, key="tiefe", step=0.05)
     else:
         st.info(f"Masse: {st.session_state.breite:.2f}m x {st.session_state.hoehe:.2f}m x {st.session_state.tiefe:.2f}m")
 
@@ -244,13 +256,12 @@ with col2:
     st.write(f"**Auswahl:** {st.session_state.rows} Breit x {st.session_state.columns} Hoch")
 
     # Section 3: Farbauswahl
-    st.markdown("### Farbauswahl")
     st.session_state.farbe = color_selector(default_color_hex=st.session_state.farbe)
 
     # Section 4: Montage & Technik
     st.markdown("### Montage & Technik")
-    st.session_state.mounting_type = st.selectbox("Montageart", ["Wandmontage", "Freistehend", "Unterputz"], index=0)
-    st.session_state.sonerie_active = st.checkbox("Sonerie integrieren", value=st.session_state.sonerie_active)
+    st.radio("Montageart", ["Wandmontage", "Freistehend"], key="mounting_type")
+    st.radio("Sonerie", ["Nein", "Ja"], key="sonerie_mode")
 
     st.markdown("---")
 
