@@ -147,9 +147,10 @@ def create_circle_points(center, radius, num_segments=16):
         points.append((cx + math.cos(angle) * radius, cy + math.sin(angle) * radius))
     return points
 
-def get_sonerie_holes(width, height, num_apartments, is_double_height=False):
+def get_sonerie_holes(width, height, num_apartments, is_double_height=False, has_intercom=False):
     """
     Berechnet die Positionen fuer Namensschilder und Klingelknoepfe auf dem Sonerie-Panel.
+    Gibt die Löcher und die berechnete Position für Technik (Kamera/Lautsprecher) zurück.
     """
     holes = []
     
@@ -169,9 +170,13 @@ def get_sonerie_holes(width, height, num_apartments, is_double_height=False):
     if num_apartments <= max_per_col:
         left_count = num_apartments
         right_count = 0
+        # Technik Position: Rechts, wenn nur links belegt ist
+        tech_x = width * 0.75
     else:
         left_count = math.ceil(num_apartments / 2)
         right_count = num_apartments - left_count
+        # Technik Position: Mitte, wenn beide Spalten belegt sind
+        tech_x = width * 0.5
     
     # Linke Spalte
     plate_x_left = 0.04
@@ -206,7 +211,41 @@ def get_sonerie_holes(width, height, num_apartments, is_double_height=False):
             circle_pts = create_circle_points(center, radius)
             holes.append({"name": f"Sonerie_Btn_R_{i}", "points": circle_pts, "type": "circle", "center": center, "radius": radius})
         
-    return holes
+    # --- Technik Positionierung ---
+    # Wenn keine Wohnungen da sind, Technik ganz nach oben (Row 0).
+    # Sonst "In der Höhe ein Schild nach unten versetzt" (Row 1).
+    if num_apartments == 0:
+        tech_y_center = start_y + NAMEPLATE_HEIGHT / 2
+    else:
+        # start_y ist die Unterkante des obersten Schilds.
+        # Wir nehmen die Mitte des Slots darunter.
+        tech_y_center = (start_y - step_y) + NAMEPLATE_HEIGHT / 2
+
+    # Kamera Position: Mitte erstes Schild (ganz oben)
+    camera_y = start_y + NAMEPLATE_HEIGHT / 2
+    
+    # Speaker (Freisprechanlage)
+    if has_intercom:
+        # 8x8 Grid, Diameter 0.001, Spacing 0.004
+        grid_spacing = 0.004
+        grid_size = 8
+        grid_width = (grid_size - 1) * grid_spacing
+        
+        # Speaker etwas nach unten versetzen (-2.5cm vom Zentrum)
+        start_grid_x = tech_x - grid_width / 2
+        start_grid_y = (tech_y_center - 0.025) - grid_width / 2
+        
+        for r in range(grid_size):
+            for c in range(grid_size):
+                cx = start_grid_x + c * grid_spacing
+                cy = start_grid_y + r * grid_spacing
+                # Kleines Loch
+                radius = 0.0005 # Diameter 0.001
+                circle_pts = create_circle_points((cx, cy), radius, num_segments=8)
+                holes.append({"name": f"Speaker_{r}_{c}", "points": circle_pts, "type": "circle", "center": (cx, cy), "radius": radius})
+
+    return holes, (tech_x, tech_y_center)
+    return holes, {"x": tech_x, "speaker_y": tech_y_center, "camera_y": camera_y}
 
 # ------------------ Styling & Properties Helfer ------------------
 
@@ -565,6 +604,8 @@ def generate_mailbox_ifc(
     color: str = "#C0C0C0",  # Default: Farblos eloxiert
     mounting_type: str = "Wandmontage",
     sonerie_positions: Optional[List[Tuple[int, int]]] = None,
+    has_intercom: bool = False,
+    has_camera: bool = False,
 ) -> Optional[Path]:
     rows = max(1, min(rows, 5))
     columns = max(1, min(columns, 4))
@@ -754,7 +795,8 @@ def generate_mailbox_ifc(
             sy_sonerie = sonerie_h / BASE_HEIGHT
             scaled_outer_sonerie = scale_profile(BASE_OUTER_POINTS, sx_sonerie, sy_sonerie)
             
-            sonerie_holes_data = get_sonerie_holes(width, sonerie_h, num_apartments, is_double_height=sonerie_double_height)
+            sonerie_holes_data, tech_center = get_sonerie_holes(width, sonerie_h, num_apartments, is_double_height=sonerie_double_height, has_intercom=has_intercom)
+            sonerie_holes_data, tech_pos = get_sonerie_holes(width, sonerie_h, num_apartments, is_double_height=sonerie_double_height, has_intercom=has_intercom)
             sonerie_curves = [create_indexed_polycurve(f, h["points"], closed=True) for h in sonerie_holes_data]
             
             # Solid
@@ -768,6 +810,26 @@ def generate_mailbox_ifc(
             
             sonerie_maps = [create_representation_map(f, sonerie_rep), create_representation_map(f, sonerie_wf)]
             
+            # --- Kamera hinzufügen (falls aktiv) ---
+            if has_camera:
+                cam_x, cam_y_base = tech_center
+                cam_y = cam_y_base + 0.025 # 2.5cm über dem Zentrum (5cm Abstand zum Speaker)
+                cam_x = tech_pos["x"]
+                cam_y = tech_pos["camera_y"]
+                
+                # Sphere erstellen (Radius 0.02 -> Diameter 0.04)
+                # Positionierung: Z=0.02 damit sie auf der Platte sitzt (Platte ist bei Z=0)
+                cam_pos = f.create_entity("IfcAxis2Placement3D", create_point(f, (cam_x, cam_y, 0.02)), create_direction(f, (0.0, 0.0, 1.0)), create_direction(f, (1.0, 0.0, 0.0)))
+                # Positionierung: Z=0.0 (Mittelpunkt auf Plattenebene)
+                cam_pos = f.create_entity("IfcAxis2Placement3D", create_point(f, (cam_x, cam_y, 0.0)), create_direction(f, (0.0, 0.0, 1.0)), create_direction(f, (1.0, 0.0, 0.0)))
+                cam_sphere = f.create_entity("IfcSphere", Position=cam_pos, Radius=0.02)
+                
+                # Representation für Kamera
+                cam_rep = f.create_entity("IfcShapeRepresentation", body_ctx, "Body", "CSG", [cam_sphere])
+                assign_style_to_shape(f, cam_rep, main_style) # Gleiche Farbe oder Schwarz? Nehmen wir main_style
+                
+                sonerie_maps.append(create_representation_map(f, cam_rep))
+
             # Einlagen für Sonerie (Namensschilder + Knöpfe)
             for h in sonerie_holes_data:
                 if h["type"] == "rect":

@@ -19,14 +19,14 @@ DEFAULT_FARBE = "#C0C0C0"  # Farblos eloxiert / Grau
 
 @st.cache_data(show_spinner=False)
 def generate_and_convert_model(
-    width: float, height: float, depth: float, color: str, rows: int, columns: int, mounting_type: str, sonerie_positions: List[Tuple[int, int]], cache_buster: str
+    width: float, height: float, depth: float, color: str, rows: int, columns: int, mounting_type: str, sonerie_positions: List[Tuple[int, int]], has_intercom: bool, has_camera: bool, cache_buster: str
 ) -> Optional[Tuple[bytes, bytes]]:
     """
     Generiert ein IFC-Modell, konvertiert es nach GLB und gibt die GLB- und IFC-Daten als Bytes zurück.
     Streamlit's Caching verhindert die Neugenerierung bei gleichen Parametern.
     """
     ifc_path = generate_mailbox_ifc(
-        width=width, height=height, depth=depth, color=color, rows=rows, columns=columns, mounting_type=mounting_type, sonerie_positions=sonerie_positions
+        width=width, height=height, depth=depth, color=color, rows=rows, columns=columns, mounting_type=mounting_type, sonerie_positions=sonerie_positions, has_intercom=has_intercom, has_camera=has_camera
     )
     if not ifc_path:
         st.error("IFC-Datei konnte nicht erstellt werden.")
@@ -140,6 +140,10 @@ if 'sonerie_selection' not in st.session_state:
     st.session_state.sonerie_selection = set([(0, 0)]) # Default unten links
 if 'format_selection' not in st.session_state:
     st.session_state.format_selection = "Querformat"
+if 'has_intercom' not in st.session_state:
+    st.session_state.has_intercom = False
+if 'has_camera' not in st.session_state:
+    st.session_state.has_camera = False
 
 # --- Validierung gegen veraltete Session-State-Werte ---
 # Verhindert Fehler, wenn noch alte Werte (z.B. "Wand" oder False) im Cache liegen
@@ -171,7 +175,9 @@ with st.spinner("Aktualisiere Modell..."):
         st.session_state.columns,
         st.session_state.mounting_type,
         current_sonerie_positions,
-        "v2.2", # Cache Buster: Zwingt Streamlit zur Neugenerierung bei Code-Änderungen
+        st.session_state.has_intercom,
+        st.session_state.has_camera,
+        "v2.3", # Cache Buster: Zwingt Streamlit zur Neugenerierung bei Code-Änderungen
     )
     if model_data:
         glb_bytes, ifc_bytes = model_data
@@ -272,6 +278,8 @@ with col2:
     st.radio("Sonerie", ["Nein", "Ja"], key="sonerie_mode")
 
     if st.session_state.sonerie_mode == "Ja":
+        st.checkbox("Freisprechanlage", key="has_intercom")
+        st.checkbox("Kamera", key="has_camera")
         st.caption("Position der Sonerie wählen:")
         
         # Check double height condition (Max 10 Namensschilder pro Feld)
