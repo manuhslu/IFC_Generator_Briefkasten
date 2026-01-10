@@ -9,7 +9,7 @@ Parametrische Briefkasten-Generierung als IFC:
 
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Tuple
 import math
 
 import ifcopenshell
@@ -147,51 +147,64 @@ def create_circle_points(center, radius, num_segments=16):
         points.append((cx + math.cos(angle) * radius, cy + math.sin(angle) * radius))
     return points
 
-def get_sonerie_holes(width, height, total_boxes):
+def get_sonerie_holes(width, height, num_apartments, is_double_height=False):
     """
     Berechnet die Positionen fuer Namensschilder und Klingelknoepfe auf dem Sonerie-Panel.
     """
     holes = []
-    # Wir nehmen an, dass die Sonerie selbst einen Slot belegt, also brauchen wir Knoepfe fuer (total - 1)
-    # Wenn total_boxes == 1, ist es nur die Sonerie (z.B. Kamera), evtl. 1 Klingel.
-    num_apartments = max(1, total_boxes - 1)
     
     start_y = height - 0.06  # Start oben mit Rand
-    gap_y = 0.02
-    step_y = NAMEPLATE_HEIGHT + gap_y
     
-    # Spalten-Logik
-    col1_x = 0.04
-    # Falls wir zwei Spalten brauchen (wenn es vertikal nicht reicht)
-    # Einfache Heuristik: Wenn mehr als X Parteien, 2 Spalten. 
-    # Oder checken ob y < margin.
+    if is_double_height:
+        step_y = 0.05  # Reduzierter Abstand (vorher 0.072)
+    else:
+        step_y = NAMEPLATE_HEIGHT + 0.01 # Reduzierter Abstand (vorher +0.02)
+
+    # Maximale Anzahl pro Spalte berechnen
+    # y_last = start_y - (n-1)*step_y >= margin (0.02)
+    margin_bottom = 0.02
+    max_per_col = int((start_y - margin_bottom) / step_y) + 1
+
+    # Logik: Wenn alle links Platz haben, nur links. Sonst aufteilen.
+    if num_apartments <= max_per_col:
+        left_count = num_apartments
+        right_count = 0
+    else:
+        left_count = math.ceil(num_apartments / 2)
+        right_count = num_apartments - left_count
     
-    current_y = start_y
-    current_col = 1
+    # Linke Spalte
+    plate_x_left = 0.04
+    btn_x_left = plate_x_left + NAMEPLATE_WIDTH + 0.02
     
-    for i in range(num_apartments):
-        if current_y < 0.05: # Zu weit unten, neue Spalte
-            current_col = 2
-            current_y = start_y
+    for i in range(left_count):
+        y = start_y - i * step_y
+        # Namensschild
+        rect_pts = [(plate_x_left, y), (plate_x_left, y + NAMEPLATE_HEIGHT), (plate_x_left + NAMEPLATE_WIDTH, y + NAMEPLATE_HEIGHT), (plate_x_left + NAMEPLATE_WIDTH, y)]
+        holes.append({"name": f"Sonerie_Name_L_{i}", "points": rect_pts, "type": "rect"})
         
-        if current_col == 1:
-            plate_x = col1_x
-            btn_x = plate_x + NAMEPLATE_WIDTH + 0.03
-        else:
-            plate_x = width - col1_x - NAMEPLATE_WIDTH
-            btn_x = plate_x - 0.03
-            
-        # Namensschild (Rechteck)
-        rect_pts = [(plate_x, current_y), (plate_x, current_y + NAMEPLATE_HEIGHT), (plate_x + NAMEPLATE_WIDTH, current_y + NAMEPLATE_HEIGHT), (plate_x + NAMEPLATE_WIDTH, current_y)]
-        holes.append({"name": f"Sonerie_Name_{i}", "points": rect_pts, "type": "rect"})
-        
-        # Knopf (Kreis)
+        # Knopf
         radius = 0.0075
-        center = (btn_x, current_y + NAMEPLATE_HEIGHT/2)
-        circle_pts = create_circle_points(center, radius) # 1.5cm Durchmesser
-        holes.append({"name": f"Sonerie_Btn_{i}", "points": circle_pts, "type": "circle", "center": center, "radius": radius})
+        center = (btn_x_left, y + NAMEPLATE_HEIGHT/2)
+        circle_pts = create_circle_points(center, radius)
+        holes.append({"name": f"Sonerie_Btn_L_{i}", "points": circle_pts, "type": "circle", "center": center, "radius": radius})
+
+    # Rechte Spalte (falls vorhanden)
+    if right_count > 0:
+        plate_x_right = width - 0.04 - NAMEPLATE_WIDTH
+        btn_x_right = plate_x_right - 0.02
         
-        current_y -= step_y
+        for i in range(right_count):
+            y = start_y - i * step_y
+            # Namensschild
+            rect_pts = [(plate_x_right, y), (plate_x_right, y + NAMEPLATE_HEIGHT), (plate_x_right + NAMEPLATE_WIDTH, y + NAMEPLATE_HEIGHT), (plate_x_right + NAMEPLATE_WIDTH, y)]
+            holes.append({"name": f"Sonerie_Name_R_{i}", "points": rect_pts, "type": "rect"})
+            
+            # Knopf
+            radius = 0.0075
+            center = (btn_x_right, y + NAMEPLATE_HEIGHT/2)
+            circle_pts = create_circle_points(center, radius)
+            holes.append({"name": f"Sonerie_Btn_R_{i}", "points": circle_pts, "type": "circle", "center": center, "radius": radius})
         
     return holes
 
@@ -225,10 +238,10 @@ def create_surface_style(f, name, rgb):
     )
 
 def assign_style_to_shape(f, shape_rep, style):
-    """Weist den Style dem ersten Item der ShapeRepresentation zu."""
+    """Weist den Style allen Items der ShapeRepresentation zu."""
     if shape_rep and shape_rep.Items:
-        item = shape_rep.Items[0]
-        f.create_entity("IfcStyledItem", Item=item, Styles=[style], Name="StyleAssignment")
+        for item in shape_rep.Items:
+            f.create_entity("IfcStyledItem", Item=item, Styles=[style], Name="StyleAssignment")
 
 def add_property_set(f, product, pset_name, properties_dict):
     """Fügt einem Produkt ein PropertySet hinzu."""
@@ -551,10 +564,10 @@ def generate_mailbox_ifc(
     output_path: Optional[Path] = None,
     color: str = "#C0C0C0",  # Default: Farblos eloxiert
     mounting_type: str = "Wandmontage",
-    sonerie_active: bool = False,
+    sonerie_positions: Optional[List[Tuple[int, int]]] = None,
 ) -> Optional[Path]:
     rows = max(1, min(rows, 5))
-    columns = max(1, min(columns, 3))
+    columns = max(1, min(columns, 4))
 
     try:
         f, body_ctx, storey = create_project_hierarchy()
@@ -613,6 +626,9 @@ def generate_mailbox_ifc(
         rgb_color = hex_to_rgb(color)
         main_style = create_surface_style(f, f"Style_{color}", rgb_color)
 
+        # Style für Linien (Schwarz)
+        line_style = create_surface_style(f, "Style_Lines_Black", (0.0, 0.0, 0.0))
+
         # Standard Style für Einlagen (immer Farblos eloxiert)
         farblos_hex = "#C0C0C0"
         if color.upper() == farblos_hex:
@@ -665,6 +681,7 @@ def generate_mailbox_ifc(
         
         # Style und Pset auf Rahmen anwenden
         assign_style_to_shape(f, frame_element.Representation.Representations[0], main_style)
+        assign_style_to_shape(f, frame_element.Representation.Representations[1], line_style)
         add_property_set(f, frame_element, "Pset_ManufacturerTypeInformation", pset_data)
 
         # --- Rückwand erzeugen ---
@@ -685,6 +702,8 @@ def generate_mailbox_ifc(
         )
         # create_plate erstellt jetzt automatisch Wireframe, wenn keine Map übergeben wird
         assign_style_to_shape(f, back_panel.Representation.Representations[0], main_style)
+        if len(back_panel.Representation.Representations) > 1:
+            assign_style_to_shape(f, back_panel.Representation.Representations[1], line_style)
         add_property_set(f, back_panel, "Pset_ManufacturerTypeInformation", pset_data)
 
         # --- VORBEREITUNG: Geometrien einmalig erstellen (Instancing) ---
@@ -714,10 +733,19 @@ def generate_mailbox_ifc(
         sonerie_inlays_data = []
         sonerie_double_height = False
         
-        if sonerie_active:
-            # Check ob Sonerie doppelte Höhe braucht (bei vielen Parteien, z.B. 4x3=12, 5x3=15)
-            if rows * columns >= 12 and columns >= 2:
+        if sonerie_positions:
+            total_boxes = rows * columns
+            # Regel: Max 10 Namensschilder pro Feld.
+            # Wenn wir 1 Feld Sonerie haben, bleiben (Total - 1) Wohnungen.
+            # Wenn (Total - 1) > 10, dann brauchen wir 2 Felder (sofern columns >= 2).
+            if (total_boxes - 1) > 10 and columns >= 2:
                 sonerie_double_height = True
+                # Bei doppelter Höhe fallen 2 Felder für die Sonerie weg
+                num_apartments = max(0, total_boxes - 2)
+            else:
+                sonerie_double_height = False
+                # Bei einfacher Höhe fällt 1 Feld weg
+                num_apartments = max(0, total_boxes - 1)
             
             sonerie_h = (2 * height + GAP) if sonerie_double_height else height
             
@@ -726,7 +754,7 @@ def generate_mailbox_ifc(
             sy_sonerie = sonerie_h / BASE_HEIGHT
             scaled_outer_sonerie = scale_profile(BASE_OUTER_POINTS, sx_sonerie, sy_sonerie)
             
-            sonerie_holes_data = get_sonerie_holes(width, sonerie_h, rows * columns)
+            sonerie_holes_data = get_sonerie_holes(width, sonerie_h, num_apartments, is_double_height=sonerie_double_height)
             sonerie_curves = [create_indexed_polycurve(f, h["points"], closed=True) for h in sonerie_holes_data]
             
             # Solid
@@ -736,6 +764,7 @@ def generate_mailbox_ifc(
             # Wireframe
             sonerie_wf_pts = [h["points"] for h in sonerie_holes_data]
             sonerie_wf = create_3d_wireframe(f, body_ctx, scaled_outer_sonerie, PLATE_THICKNESS, sonerie_wf_pts)
+            assign_style_to_shape(f, sonerie_wf, line_style)
             
             sonerie_maps = [create_representation_map(f, sonerie_rep), create_representation_map(f, sonerie_wf)]
             
@@ -751,6 +780,7 @@ def generate_mailbox_ifc(
                 inlay_rep = create_extruded_shape(f, body_ctx, pts, [], PLATE_THICKNESS, arc_indices=[])
                 assign_style_to_shape(f, inlay_rep, standard_style)
                 inlay_wf = create_3d_wireframe(f, body_ctx, pts, PLATE_THICKNESS)
+                assign_style_to_shape(f, inlay_wf, line_style)
                 
                 maps = [create_representation_map(f, inlay_rep), create_representation_map(f, inlay_wf)]
                 sonerie_inlays_data.append({"name": h["name"] + "_Inlay", "maps": maps})
@@ -775,6 +805,7 @@ def generate_mailbox_ifc(
         # Wireframe für Deckblatt erstellen (inkl. Löcher)
         deck_holes_points = [h["points"] for h in adjusted_holes]
         shape_deckblatt_wireframe = create_3d_wireframe(f, body_ctx, scaled_outer_single, PLATE_THICKNESS, deck_holes_points)
+        assign_style_to_shape(f, shape_deckblatt_wireframe, line_style)
         
         # Maps erstellen (Solid und Wireframe separat)
         deck_map = create_representation_map(f, shape_deckblatt_rep)
@@ -796,6 +827,7 @@ def generate_mailbox_ifc(
             
             # Wireframe für Einlage
             shape_wireframe = create_3d_wireframe(f, body_ctx, shrunk_hole, PLATE_THICKNESS)
+            assign_style_to_shape(f, shape_wireframe, line_style)
             
             if idx == 3: # Einwurfklappe bekommt auch die Farbe
                 assign_style_to_shape(f, shape_rep, main_style)
@@ -804,16 +836,21 @@ def generate_mailbox_ifc(
             insert_maps[idx] = [create_representation_map(f, shape_rep), create_representation_map(f, shape_wireframe)]
 
         # Raster an Platten (Deckblatt + Einlagen) erzeugen
+        skip_positions = set()
+
         for r in range(rows):
             for c in range(columns):
+                if (r, c) in skip_positions:
+                    continue
+
                 offset_x = -(r * (width + GAP))
                 offset_z = c * (height + GAP)
 
-                # Check Sonerie Position (Unten Links: r=0, c=0)
-                if sonerie_active and r == 0 and c == 0:
+                # Check Sonerie Position
+                if sonerie_positions and (r, c) in sonerie_positions:
                     sonerie_pos = (offset_x, 0.0, offset_z)
                     create_plate(
-                        f, body_ctx, "Sonerie Modul", None, None, None,
+                        f, body_ctx, f"Sonerie Modul {r}/{c}", None, None, None,
                         bierkasten_lp, aggregate_parent=bierkasten,
                         representation_maps=sonerie_maps,
                         pos_offset=sonerie_pos
@@ -827,11 +864,11 @@ def generate_mailbox_ifc(
                             representation_maps=inlay["maps"],
                             pos_offset=sonerie_pos
                         )
-                    # Keine Einlagen fuer Sonerie
-                    continue
-                
-                # Wenn Sonerie doppelte Höhe hat, muss das Feld darüber (r=0, c=1) übersprungen werden
-                if sonerie_active and sonerie_double_height and r == 0 and c == 1:
+                    
+                    # Wenn Sonerie doppelte Höhe hat, muss das Feld darüber übersprungen werden
+                    if sonerie_double_height:
+                        skip_positions.add((r, c + 1))
+                    
                     continue
 
                 # Deckblatt platzieren (Direkt an Bierkasten, flache Hierarchie für besseren Export)
@@ -924,7 +961,7 @@ if __name__ == "__main__":
         color="#4D6F39", 
         output_path=Path("test_generate_mailbox_5x3.ifc"),
         mounting_type="Freistehend",
-        sonerie_active=True
+        sonerie_positions=[(0, 0)]
     )
     if out2:
         print(f"IFC erstellt: {out2}")

@@ -1,6 +1,6 @@
 import streamlit as st
 import base64
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 from datetime import datetime
 from pathlib import Path
@@ -19,14 +19,14 @@ DEFAULT_FARBE = "#C0C0C0"  # Farblos eloxiert / Grau
 
 @st.cache_data(show_spinner=False)
 def generate_and_convert_model(
-    width: float, height: float, depth: float, color: str, rows: int, columns: int, mounting_type: str, sonerie_active: bool
+    width: float, height: float, depth: float, color: str, rows: int, columns: int, mounting_type: str, sonerie_positions: List[Tuple[int, int]], cache_buster: str
 ) -> Optional[Tuple[bytes, bytes]]:
     """
     Generiert ein IFC-Modell, konvertiert es nach GLB und gibt die GLB- und IFC-Daten als Bytes zurück.
     Streamlit's Caching verhindert die Neugenerierung bei gleichen Parametern.
     """
     ifc_path = generate_mailbox_ifc(
-        width=width, height=height, depth=depth, color=color, rows=rows, columns=columns, mounting_type=mounting_type, sonerie_active=sonerie_active
+        width=width, height=height, depth=depth, color=color, rows=rows, columns=columns, mounting_type=mounting_type, sonerie_positions=sonerie_positions
     )
     if not ifc_path:
         st.error("IFC-Datei konnte nicht erstellt werden.")
@@ -136,6 +136,8 @@ if 'mounting_type' not in st.session_state:
     st.session_state.mounting_type = "Wandmontage"
 if 'sonerie_mode' not in st.session_state:
     st.session_state.sonerie_mode = "Nein"
+if 'sonerie_selection' not in st.session_state:
+    st.session_state.sonerie_selection = set([(0, 0)]) # Default unten links
 if 'format_selection' not in st.session_state:
     st.session_state.format_selection = "Querformat"
 
@@ -148,6 +150,11 @@ if st.session_state.mounting_type not in valid_mounting:
 valid_sonerie = ["Nein", "Ja"]
 if st.session_state.sonerie_mode not in valid_sonerie:
     st.session_state.sonerie_mode = valid_sonerie[0]
+
+# Vorbereitung der Sonerie-Positionen für den Generator
+current_sonerie_positions = []
+if st.session_state.sonerie_mode == "Ja":
+    current_sonerie_positions = sorted(list(st.session_state.sonerie_selection))
 
 # --- Zentrale Modellgenerierung ---
 # Das Modell wird immer basierend auf dem aktuellen session_state generiert.
@@ -163,7 +170,8 @@ with st.spinner("Aktualisiere Modell..."):
         st.session_state.rows,
         st.session_state.columns,
         st.session_state.mounting_type,
-        st.session_state.sonerie_mode == "Ja",
+        current_sonerie_positions,
+        "v2.2", # Cache Buster: Zwingt Streamlit zur Neugenerierung bei Code-Änderungen
     )
     if model_data:
         glb_bytes, ifc_bytes = model_data
@@ -231,9 +239,9 @@ with col2:
     st.markdown("### Anordnung")
     st.caption("Wählen Sie die Grösse durch Klicken auf das Raster:")
 
-    # Grid-Selector: 5 breit (rows), 3 hoch (columns)
-    # Wir rendern von oben (3) nach unten (1), damit es wie ein physischer Aufbau aussieht.
-    for h in range(3, 0, -1):
+    # Grid-Selector: 5 breit (rows), 4 hoch (columns)
+    # Wir rendern von oben (4) nach unten (1), damit es wie ein physischer Aufbau aussieht.
+    for h in range(4, 0, -1):
         cols_ui = st.columns(5)
         for w in range(1, 6):
             # Ist dieser Slot Teil der aktuellen Auswahl?
@@ -256,12 +264,70 @@ with col2:
     st.write(f"**Auswahl:** {st.session_state.rows} Breit x {st.session_state.columns} Hoch")
 
     # Section 3: Farbauswahl
-    st.session_state.farbe = color_selector(default_color_hex=st.session_state.farbe)
+    color_selector(key="farbe")
 
     # Section 4: Montage & Technik
     st.markdown("### Montage & Technik")
     st.radio("Montageart", ["Wandmontage", "Freistehend"], key="mounting_type")
     st.radio("Sonerie", ["Nein", "Ja"], key="sonerie_mode")
+
+    if st.session_state.sonerie_mode == "Ja":
+        st.caption("Position der Sonerie wählen:")
+        
+        # Check double height condition (Max 10 Namensschilder pro Feld)
+        # Wenn (Total - 1) > 10, dann doppelte Höhe nötig.
+        total_boxes = st.session_state.rows * st.session_state.columns
+        is_double_height = ((total_boxes - 1) > 10) and (st.session_state.columns >= 2)
+
+        # Grid Selector für Sonerie-Positionen
+        # Wir iterieren von oben (columns-1) nach unten (0)
+        for c in range(st.session_state.columns - 1, -1, -1):
+            cols_son = st.columns(st.session_state.rows)
+            for r in range(st.session_state.rows):
+                # Determine selection state
+                is_start = (r, c) in st.session_state.sonerie_selection
+                is_extension = False
+                # If double height, check if this slot is the "top" part of a selected start
+                if is_double_height and c > 0 and (r, c - 1) in st.session_state.sonerie_selection:
+                    is_extension = True
+                
+                is_selected = is_start or is_extension
+                
+                # Determine interactivity
+                is_disabled = False
+                click_target = (r, c)
+                
+                # "nur die oberste reihe ist gespert" (als Startposition)
+                if is_double_height and c == st.session_state.columns - 1:
+                    if is_extension:
+                        # Wenn es eine Erweiterung ist, soll es leuchten (nicht disabled)
+                        # Klick darauf entfernt die Auswahl (target = start position)
+                        click_target = (r, c - 1)
+                    else:
+                        is_disabled = True
+                elif is_extension:
+                    # Klick auf Erweiterung toggelt die Basis
+                    click_target = (r, c - 1)
+                
+                def toggle_sonerie(pos=click_target):
+                    # Max 1 Logic: Clear others
+                    if pos in st.session_state.sonerie_selection:
+                        st.session_state.sonerie_selection.remove(pos)
+                    else:
+                        st.session_state.sonerie_selection.clear()
+                        st.session_state.sonerie_selection.add(pos)
+                
+                btn_type = "primary" if is_selected else "secondary"
+                
+                cols_son[r].button(
+                    " ",
+                    key=f"son_pos_{r}_{c}",
+                    on_click=toggle_sonerie,
+                    use_container_width=True,
+                    type=btn_type,
+                    disabled=is_disabled,
+                    help=f"Sonerie an Position {r+1}/{c+1}"
+                )
 
     st.markdown("---")
 

@@ -50,7 +50,7 @@ if __name__ == "__main__":
     tests = [
         {"rows": 1, "columns": 1, "color": "#4D6F39", "name": "test_generate_mailbox_1x1"},
         # Maximal: rows=3 (X), columns=5 (Z)
-        {"rows": 5, "columns": 3, "color": "#4D6F39", "name": "test_generate_mailbox_5x3"},
+        {"rows": 5, "columns": 3, "color": "#4D6F39", "name": "test_generate_mailbox_5x3", "sonerie_positions": [(0,0)]},
     ]
 
     for t in tests:
@@ -60,6 +60,7 @@ if __name__ == "__main__":
             columns=t["columns"],
             color=t["color"],
             output_path=Path(f"{t['name']}.ifc"),
+            sonerie_positions=t.get("sonerie_positions")
         )
         if ifc_path:
             glb_path = Path(f"{t['name']}.glb")
