@@ -177,7 +177,7 @@ with st.spinner("Aktualisiere Modell..."):
         current_sonerie_positions,
         st.session_state.has_intercom,
         st.session_state.has_camera,
-        "v2.3", # Cache Buster: Zwingt Streamlit zur Neugenerierung bei Code-Änderungen
+        "v2.8", # Cache Buster: Zwingt Streamlit zur Neugenerierung bei Code-Änderungen
     )
     if model_data:
         glb_bytes, ifc_bytes = model_data

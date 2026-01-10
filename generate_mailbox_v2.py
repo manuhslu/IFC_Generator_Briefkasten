@@ -147,43 +147,62 @@ def create_circle_points(center, radius, num_segments=16):
         points.append((cx + math.cos(angle) * radius, cy + math.sin(angle) * radius))
     return points
 
+def calculate_sonerie_grid(height):
+    """
+    Berechnet das Raster für die Sonerie basierend auf der Höhe.
+    Returns: (step_y, start_y, max_rows, capacity)
+    """
+    # Visuelle Ränder (Abstand Kante bis Schild)
+    top_margin_visual = 0.03
+    bottom_margin_visual = 0.03 # "Unten muss noch der gleiche abstand wie oben sein"
+    
+    plate_h = NAMEPLATE_HEIGHT # 0.03
+    gap = 0.005
+    step_y = plate_h + gap # 0.04
+    
+    # start_y: Y-Koordinate der Unterkante des obersten Elements (Row 0)
+    # Oberkante Element = height - top_margin_visual
+    start_y = height - (top_margin_visual + plate_h)
+    
+    # min_y: Y-Koordinate der Unterkante des untersten Elements
+    min_y = bottom_margin_visual
+    
+    if start_y < min_y:
+        max_rows = 0
+    else:
+        # Wie viele Schritte passen rein?
+        max_rows = int((start_y - min_y) / step_y) + 1
+        
+    # Kapazität: 2 Spalten * max_rows - 2 (für Technik in Zeile 0 reserviert)
+    capacity = max(0, max_rows * 2 - 2)
+    
+    return step_y, start_y, max_rows, capacity
+
 def get_sonerie_holes(width, height, num_apartments, is_double_height=False, has_intercom=False):
     """
     Berechnet die Positionen fuer Namensschilder und Klingelknoepfe auf dem Sonerie-Panel.
     Gibt die Löcher und die berechnete Position für Technik (Kamera/Lautsprecher) zurück.
     """
     holes = []
+    step_y, start_y, max_rows, _ = calculate_sonerie_grid(height)
     
-    start_y = height - 0.06  # Start oben mit Rand
+    # Aufteilung der Wohnungen auf Spalten (startend ab Zeile 1)
+    # Zeile 0 ist für Technik reserviert.
+    # Verfügbare Slots für Wohnungen: (max_rows - 1) pro Spalte.
     
-    if is_double_height:
-        step_y = 0.05  # Reduzierter Abstand (vorher 0.072)
-    else:
-        step_y = NAMEPLATE_HEIGHT + 0.01 # Reduzierter Abstand (vorher +0.02)
-
-    # Maximale Anzahl pro Spalte berechnen
-    # y_last = start_y - (n-1)*step_y >= margin (0.02)
-    margin_bottom = 0.02
-    max_per_col = int((start_y - margin_bottom) / step_y) + 1
-
-    # Logik: Wenn alle links Platz haben, nur links. Sonst aufteilen.
-    if num_apartments <= max_per_col:
-        left_count = num_apartments
-        right_count = 0
-        # Technik Position: Rechts, wenn nur links belegt ist
-        tech_x = width * 0.75
-    else:
-        left_count = math.ceil(num_apartments / 2)
-        right_count = num_apartments - left_count
-        # Technik Position: Mitte, wenn beide Spalten belegt sind
-        tech_x = width * 0.5
+    left_count = math.ceil(num_apartments / 2)
+    right_count = num_apartments - left_count
     
     # Linke Spalte
-    plate_x_left = 0.04
-    btn_x_left = plate_x_left + NAMEPLATE_WIDTH + 0.02
+    plate_x_left = 0.02
+    btn_x_left = plate_x_left + NAMEPLATE_WIDTH + 0.02 # Button rechts vom Schild
     
+    # Namensschilder ab Zeile 1 (i+1)
     for i in range(left_count):
-        y = start_y - i * step_y
+        row_idx = i + 1
+        if row_idx >= max_rows: break # Overflow Schutz
+        
+        y = start_y - row_idx * step_y
         # Namensschild
         rect_pts = [(plate_x_left, y), (plate_x_left, y + NAMEPLATE_HEIGHT), (plate_x_left + NAMEPLATE_WIDTH, y + NAMEPLATE_HEIGHT), (plate_x_left + NAMEPLATE_WIDTH, y)]
         holes.append({"name": f"Sonerie_Name_L_{i}", "points": rect_pts, "type": "rect"})
@@ -195,34 +214,33 @@ def get_sonerie_holes(width, height, num_apartments, is_double_height=False, has
         holes.append({"name": f"Sonerie_Btn_L_{i}", "points": circle_pts, "type": "circle", "center": center, "radius": radius})
 
     # Rechte Spalte (falls vorhanden)
-    if right_count > 0:
-        plate_x_right = width - 0.04 - NAMEPLATE_WIDTH
-        btn_x_right = plate_x_right - 0.02
+    plate_x_right = width - 0.02 - NAMEPLATE_WIDTH
+    btn_x_right = plate_x_right - 0.02 # Button links vom Schild
+    
+    for i in range(right_count):
+        row_idx = i + 1
+        if row_idx >= max_rows: break
         
-        for i in range(right_count):
-            y = start_y - i * step_y
-            # Namensschild
-            rect_pts = [(plate_x_right, y), (plate_x_right, y + NAMEPLATE_HEIGHT), (plate_x_right + NAMEPLATE_WIDTH, y + NAMEPLATE_HEIGHT), (plate_x_right + NAMEPLATE_WIDTH, y)]
-            holes.append({"name": f"Sonerie_Name_R_{i}", "points": rect_pts, "type": "rect"})
-            
-            # Knopf
-            radius = 0.0075
-            center = (btn_x_right, y + NAMEPLATE_HEIGHT/2)
-            circle_pts = create_circle_points(center, radius)
-            holes.append({"name": f"Sonerie_Btn_R_{i}", "points": circle_pts, "type": "circle", "center": center, "radius": radius})
+        y = start_y - row_idx * step_y
+        # Namensschild
+        rect_pts = [(plate_x_right, y), (plate_x_right, y + NAMEPLATE_HEIGHT), (plate_x_right + NAMEPLATE_WIDTH, y + NAMEPLATE_HEIGHT), (plate_x_right + NAMEPLATE_WIDTH, y)]
+        holes.append({"name": f"Sonerie_Name_R_{i}", "points": rect_pts, "type": "rect"})
+        
+        # Knopf
+        radius = 0.0075
+        center = (btn_x_right, y + NAMEPLATE_HEIGHT/2)
+        circle_pts = create_circle_points(center, radius)
+        holes.append({"name": f"Sonerie_Btn_R_{i}", "points": circle_pts, "type": "circle", "center": center, "radius": radius})
         
     # --- Technik Positionierung ---
-    # Wenn keine Wohnungen da sind, Technik ganz nach oben (Row 0).
-    # Sonst "In der Höhe ein Schild nach unten versetzt" (Row 1).
-    if num_apartments == 0:
-        tech_y_center = start_y + NAMEPLATE_HEIGHT / 2
-    else:
-        # start_y ist die Unterkante des obersten Schilds.
-        # Wir nehmen die Mitte des Slots darunter.
-        tech_y_center = (start_y - step_y) + NAMEPLATE_HEIGHT / 2
-
-    # Kamera Position: Mitte erstes Schild (ganz oben)
-    camera_y = start_y + NAMEPLATE_HEIGHT / 2
+    # Zeile 0 (ganz oben)
+    tech_y_center = start_y + NAMEPLATE_HEIGHT / 2
+    
+    # Speaker: Position erstes Namensschild (Links)
+    speaker_x = plate_x_left + NAMEPLATE_WIDTH / 2
+    
+    # Kamera: Rechts nebenan (Rechts)
+    camera_x = plate_x_right + NAMEPLATE_WIDTH / 2
     
     # Speaker (Freisprechanlage)
     if has_intercom:
@@ -232,8 +250,9 @@ def get_sonerie_holes(width, height, num_apartments, is_double_height=False, has
         grid_width = (grid_size - 1) * grid_spacing
         
         # Speaker etwas nach unten versetzen (-2.5cm vom Zentrum)
-        start_grid_x = tech_x - grid_width / 2
-        start_grid_y = (tech_y_center - 0.025) - grid_width / 2
+        # Hier: Zentriert auf dem Schild-Platz
+        start_grid_x = speaker_x - grid_width / 2
+        start_grid_y = tech_y_center - grid_width / 2
         
         for r in range(grid_size):
             for c in range(grid_size):
@@ -244,8 +263,7 @@ def get_sonerie_holes(width, height, num_apartments, is_double_height=False, has
                 circle_pts = create_circle_points((cx, cy), radius, num_segments=8)
                 holes.append({"name": f"Speaker_{r}_{c}", "points": circle_pts, "type": "circle", "center": (cx, cy), "radius": radius})
 
-    return holes, (tech_x, tech_y_center)
-    return holes, {"x": tech_x, "speaker_y": tech_y_center, "camera_y": camera_y}
+    return holes, {"speaker_x": speaker_x, "speaker_y": tech_y_center, "camera_x": camera_x, "camera_y": tech_y_center}
 
 # ------------------ Styling & Properties Helfer ------------------
 
@@ -776,17 +794,20 @@ def generate_mailbox_ifc(
         
         if sonerie_positions:
             total_boxes = rows * columns
-            # Regel: Max 10 Namensschilder pro Feld.
-            # Wenn wir 1 Feld Sonerie haben, bleiben (Total - 1) Wohnungen.
-            # Wenn (Total - 1) > 10, dann brauchen wir 2 Felder (sofern columns >= 2).
-            if (total_boxes - 1) > 10 and columns >= 2:
+            
+            # Kapazität basierend auf Höhe berechnen
+            _, _, _, capacity_single = calculate_sonerie_grid(height)
+            
+            needed_apartments = max(0, total_boxes - 1)
+            
+            if needed_apartments > capacity_single and columns >= 2:
                 sonerie_double_height = True
                 # Bei doppelter Höhe fallen 2 Felder für die Sonerie weg
                 num_apartments = max(0, total_boxes - 2)
             else:
                 sonerie_double_height = False
                 # Bei einfacher Höhe fällt 1 Feld weg
-                num_apartments = max(0, total_boxes - 1)
+                num_apartments = needed_apartments
             
             sonerie_h = (2 * height + GAP) if sonerie_double_height else height
             
@@ -795,7 +816,6 @@ def generate_mailbox_ifc(
             sy_sonerie = sonerie_h / BASE_HEIGHT
             scaled_outer_sonerie = scale_profile(BASE_OUTER_POINTS, sx_sonerie, sy_sonerie)
             
-            sonerie_holes_data, tech_center = get_sonerie_holes(width, sonerie_h, num_apartments, is_double_height=sonerie_double_height, has_intercom=has_intercom)
             sonerie_holes_data, tech_pos = get_sonerie_holes(width, sonerie_h, num_apartments, is_double_height=sonerie_double_height, has_intercom=has_intercom)
             sonerie_curves = [create_indexed_polycurve(f, h["points"], closed=True) for h in sonerie_holes_data]
             
@@ -812,21 +832,19 @@ def generate_mailbox_ifc(
             
             # --- Kamera hinzufügen (falls aktiv) ---
             if has_camera:
-                cam_x, cam_y_base = tech_center
-                cam_y = cam_y_base + 0.025 # 2.5cm über dem Zentrum (5cm Abstand zum Speaker)
-                cam_x = tech_pos["x"]
+                cam_x = tech_pos["camera_x"]
                 cam_y = tech_pos["camera_y"]
                 
                 # Sphere erstellen (Radius 0.02 -> Diameter 0.04)
-                # Positionierung: Z=0.02 damit sie auf der Platte sitzt (Platte ist bei Z=0)
-                cam_pos = f.create_entity("IfcAxis2Placement3D", create_point(f, (cam_x, cam_y, 0.02)), create_direction(f, (0.0, 0.0, 1.0)), create_direction(f, (1.0, 0.0, 0.0)))
-                # Positionierung: Z=0.0 (Mittelpunkt auf Plattenebene)
-                cam_pos = f.create_entity("IfcAxis2Placement3D", create_point(f, (cam_x, cam_y, 0.0)), create_direction(f, (0.0, 0.0, 1.0)), create_direction(f, (1.0, 0.0, 0.0)))
+                # Positionierung: Mapping von Profil (X, Y) auf Objekt (X, 0, -Y)
+                # Profil Y (Höhe) entspricht Objekt -Z. Objekt Y ist die Tiefe (0.0 = Oberfläche).
+                cam_pos = f.create_entity("IfcAxis2Placement3D", create_point(f, (cam_x, -0.01, -cam_y)), create_direction(f, (0.0, 0.0, 1.0)), create_direction(f, (1.0, 0.0, 0.0)))
                 cam_sphere = f.create_entity("IfcSphere", Position=cam_pos, Radius=0.02)
-                
+                cam_solid = f.create_entity("IfcCsgSolid", TreeRootExpression=cam_sphere)
+
                 # Representation für Kamera
-                cam_rep = f.create_entity("IfcShapeRepresentation", body_ctx, "Body", "CSG", [cam_sphere])
-                assign_style_to_shape(f, cam_rep, main_style) # Gleiche Farbe oder Schwarz? Nehmen wir main_style
+                cam_rep = f.create_entity("IfcShapeRepresentation", body_ctx, "Body", "CSG", [cam_solid])
+                assign_style_to_shape(f, cam_rep, standard_style) # Farbe wie Namensschilder (Farblos eloxiert)
                 
                 sonerie_maps.append(create_representation_map(f, cam_rep))
 
