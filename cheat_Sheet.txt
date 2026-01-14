@@ -15,6 +15,7 @@
 # 3. Kontrolle:
 > where python
 > pip list
+> git status
 
 # 4. Projekt starten (z. B.):
 > python main.py
