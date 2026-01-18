@@ -1,15 +1,41 @@
 import streamlit as st
 import base64
 from typing import Optional, Tuple, List
+import tempfile
 
 from datetime import datetime
 from pathlib import Path
 from generate_mailbox_v2 import generate_mailbox_ifc, BASE_WIDTH, BASE_HEIGHT, FRAME_DEPTH_DEFAULT
 from ifc_to_glb import convert_ifc_to_glb
 from ui_components import color_selector
+from generate_nameplate import generate_production_packages
 
 st.set_page_config(page_title="Briefkasten-Konfigurator", layout="wide")
-st.title("📬 Parametrischer Briefkasten-Konfigurator")
+
+# --- Custom CSS to hide Streamlit elements ---
+st.markdown("""
+    <style>
+        header[data-testid="stHeader"] {
+            display: none !important;
+        }
+        div[data-testid="stDecoration"] {
+            visibility: hidden !important;
+            height: 0px !important;
+        }
+        [data-testid="stToolbar"] {
+            visibility: hidden !important;
+            height: 0px !important;
+        }
+        footer {
+            display: none !important;
+        }
+        .block-container {
+            padding-top: 1rem !important;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+st.title("Parametrischer Briefkasten-Konfigurator")
 
 # --- Konstanten für Standardwerte (aus generate_mailbox_v2) ---
 DEFAULT_BREITE = BASE_WIDTH
@@ -144,6 +170,24 @@ if 'has_intercom' not in st.session_state:
     st.session_state.has_intercom = False
 if 'has_camera' not in st.session_state:
     st.session_state.has_camera = False
+if 'nameplate_text' not in st.session_state:
+    st.session_state.nameplate_text = ""
+if 'production_zip_bytes' not in st.session_state:
+    st.session_state.production_zip_bytes = None
+
+# --- Namensschild-Generierung ---
+# Läuft bei jeder Skript-Ausführung, falls Text vorhanden ist.
+# Da die Operation leichtgewichtig ist, ist kein Caching notwendig.
+if st.session_state.nameplate_text:
+    try:
+        # Generiert STL und DXF und packt sie in ein ZIP-Archiv im Speicher
+        zip_bytes = generate_production_packages(st.session_state.nameplate_text)
+        st.session_state.production_zip_bytes = zip_bytes
+    except Exception as e:
+        st.error(f"Fehler bei der Erstellung des Produktionspakets: {e}")
+        st.session_state.production_zip_bytes = None
+else:
+    st.session_state.production_zip_bytes = None
 
 # --- Validierung gegen veraltete Session-State-Werte ---
 # Verhindert Fehler, wenn noch alte Werte (z.B. "Wand" oder False) im Cache liegen
@@ -337,6 +381,14 @@ with col2:
                     help=f"Sonerie an Position {r+1}/{c+1}"
                 )
 
+    # Sektion 5: Namensschild
+    st.markdown("### Namensschild (3D-Druck)")
+    st.text_input(
+        "Name für 3D-Druck (Simulation)",
+        key="nameplate_text",
+        help="Geben Sie einen Namen ein, um eine STL-Datei für den 3D-Druck zu generieren."
+    )
+
     st.markdown("---")
 
     # Sticky Bottom Container for Downloads
@@ -360,6 +412,16 @@ with col2:
             mime="model/gltf-binary",
             use_container_width=True
         )
+    
+    if st.session_state.production_zip_bytes:
+        st.download_button(
+            label="Download Produktion",
+            data=st.session_state.production_zip_bytes,
+            file_name="production_files.zip",
+            mime="application/zip",
+            use_container_width=True
+        )
+
     st.markdown('</div>', unsafe_allow_html=True)
 
 

@@ -32,8 +32,9 @@ def convert_ifc_to_glb(ifc_path: Path, glb_path: Path):
     serialiser.setUnitNameAndMagnitude("METER", 1.0)
     serialiser.writeHeader()
 
-    # Iterator initialisieren (mehrkernig)
-    iterator = ifcopenshell.geom.iterator(settings, ifc_file, 1)
+    # Iterator initialisieren und alle verfügbaren CPU-Kerne nutzen
+    num_threads = multiprocessing.cpu_count()
+    iterator = ifcopenshell.geom.iterator(settings, ifc_file, num_threads)
     if iterator.initialize():
         while True:
             shape = iterator.get()

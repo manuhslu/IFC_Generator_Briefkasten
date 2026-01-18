@@ -994,25 +994,30 @@ def generate_mailbox_ifc(
             # Der Rahmen erweitert die Breite um FRAME_OUTER_OFFSET auf beiden Seiten.
             
             # Rechter Pfosten (Global X > 0)
-            pos_right_x = FRAME_OUTER_OFFSET + post_w/2
-            pos_right = (pos_right_x, -depth/2, 0.0)
+            pos_right_coords = (FRAME_OUTER_OFFSET + post_w/2, -depth/2, 0.0)
             
             # Linker Pfosten (Global X < -total_width)
-            pos_left_x = -(total_width + FRAME_OUTER_OFFSET) - post_w/2
-            pos_left = (pos_left_x, -depth/2, 0.0)
+            pos_left_coords = (-(total_width + FRAME_OUTER_OFFSET) - post_w/2, -depth/2, 0.0)
             
+            # 1. Geometrie für einen Pfosten einmalig am Ursprung erstellen
             post_profile = f.create_entity("IfcRectangleProfileDef", "AREA", None, axis2placement2d(f), post_w, post_d)
+            post_solid = f.create_entity("IfcExtrudedAreaSolid", post_profile, axis2placement3d(f), create_direction(f, (0.0, 0.0, 1.0)), post_h)
+            post_rep = f.create_entity("IfcShapeRepresentation", body_ctx, "Body", "SweptSolid", [post_solid])
+            assign_style_to_shape(f, post_rep, main_style) # Style auf die Basis-Rep anwenden
+
+            # 2. Representation Map für die Instanziierung erstellen
+            post_map = create_representation_map(f, post_rep)
             
-            for pname, ppos in [("Stuetze Rechts", pos_right), ("Stuetze Links", pos_left)]:
-                # Pfosten Extrusion
-                post_solid = f.create_entity("IfcExtrudedAreaSolid", post_profile, axis2placement3d(f, ppos), create_direction(f, (0.0, 0.0, 1.0)), post_h)
-                post_rep = f.create_entity("IfcShapeRepresentation", body_ctx, "Body", "SweptSolid", [post_solid])
-                post_shape = f.create_entity("IfcProductDefinitionShape", Representations=[post_rep])
+            # 3. Zwei Instanzen des Pfostens an den Zielpositionen platzieren
+            for pname, ppos in [("Stuetze Rechts", pos_right_coords), ("Stuetze Links", pos_left_coords)]:
+                # Eigene Platzierung für jede Instanz erstellen
+                post_lp = f.create_entity("IfcLocalPlacement", storey.ObjectPlacement, axis2placement3d(f, ppos))
                 
-                post_obj = f.create_entity("IfcColumn", ifcopenshell.guid.new(), Name=pname, ObjectPlacement=f.create_entity("IfcLocalPlacement", storey.ObjectPlacement, axis2placement3d(f)), Representation=post_shape)
+                # Mapped Item Shape erstellen, die auf die Basis-Geometrie verweist
+                post_shape = create_mapped_item_shape(f, body_ctx, post_map)
                 
-                assign_style_to_shape(f, post_rep, main_style)
-                f.create_entity("IfcRelContainedInSpatialStructure", ifcopenshell.guid.new(), RelatedElements=[post_obj], RelatingStructure=storey)
+                post_obj = f.create_entity("IfcColumn", ifcopenshell.guid.new(), Name=pname, ObjectPlacement=post_lp, Representation=post_shape)
+                f.create_entity("IfcRelContainedInSpatialStructure", ifcopenshell.guid.new(), None, None, None, [post_obj], storey)
 
 
         # Datei schreiben
