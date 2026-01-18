@@ -240,7 +240,7 @@ st.markdown("""
     .download-container {
         position: sticky;
         bottom: 0;
-        background-color: white;
+        background-color: transparent;
         padding: 1rem 0;
         border-top: 1px solid #f0f2f6;
         z-index: 99;
@@ -382,14 +382,11 @@ with col2:
                 )
 
     # Sektion 5: Namensschild
-    st.markdown("### Namensschild (3D-Druck)")
+    st.markdown("### Schildbeschriftung")
     st.text_input(
-        "Name für 3D-Druck (Simulation)",
+        "Bitte die gewünschte Beschriftung eingeben",
         key="nameplate_text",
-        help="Geben Sie einen Namen ein, um eine STL-Datei für den 3D-Druck zu generieren."
     )
-
-    st.markdown("---")
 
     # Sticky Bottom Container for Downloads
     st.markdown('<div class="download-container">', unsafe_allow_html=True)

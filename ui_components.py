@@ -32,7 +32,7 @@ def color_selector(key: str) -> str:
     Die Optionen enthalten jetzt ein farbiges Emoji-Quadrat zur besseren Visualisierung.
     Nutzt einen Callback, um den State sofort zu aktualisieren (verhindert "Double Click"-Problem).
     """
-    st.subheader("🎨 Farbauswahl")
+    st.subheader("Farbauswahl")
     
     # Aktuellen Wert aus Session State holen
     current_hex = st.session_state.get(key, "#C0C0C0")
