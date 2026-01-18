@@ -25,18 +25,42 @@ def _generate_common_geometry(text: str):
     text_path = TextPath((0, 0), text, size=font_size, prop=font_props)
     polygons_2d = text_path.to_polygons(closed_only=True)
 
-    # 3. Validate polygons with Shapely
-    valid_polygons = []
+    # 3. Validate and structure polygons with Shapely to handle holes
+    # 3.1. Create Shapely polygons from the Matplotlib paths.
+    raw_polygons = []
     for p in polygons_2d:
         try:
-            shapely_poly = Polygon(p)
-            if not shapely_poly.is_empty and shapely_poly.is_valid:
-                valid_polygons.append(shapely_poly)
+            poly = Polygon(p)
+            if not poly.is_empty and poly.is_valid:
+                raw_polygons.append(poly)
         except Exception:
             continue
 
-    if not valid_polygons:
+    if not raw_polygons:
         return None
+
+    # 3.2. Sort these polygons by area in descending order (largest first).
+    sorted_polygons = sorted(raw_polygons, key=lambda p: p.area, reverse=True)
+
+    # 3.3. Iterate through the sorted polygons to identify shells and their holes.
+    shells = []
+    holes = []
+    for poly in sorted_polygons:
+        is_hole = False
+        # Check if the polygon is contained within any of the already identified shells.
+        for shell in shells:
+            if shell.contains(poly):
+                holes.append((shell, poly))
+                is_hole = True
+                break  # A polygon can only be a hole for one shell.
+        if not is_hole:
+            shells.append(poly)  # If not a hole, it's a new shell.
+
+    # 3.4. Reconstruct polygons with their respective holes.
+    valid_polygons = []
+    for shell in shells:
+        shell_holes = [h.exterior for s, h in holes if s is shell]
+        valid_polygons.append(Polygon(shell.exterior, shell_holes))
 
     # 4. Calculate positioning based on a temporary mesh
     temp_meshes = [trimesh.creation.extrude_polygon(p, height=1.0) for p in valid_polygons]
