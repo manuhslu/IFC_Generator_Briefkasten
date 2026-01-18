@@ -64,5 +64,5 @@ def color_selector(key: str) -> str:
         on_change=on_change
     )
 
-    # Gib den Hex-Code der ausgewählten Farbe zurück
+    # Gib den Hex-Code von der ausgewählten Farbe zurück
     return st.session_state[key]
