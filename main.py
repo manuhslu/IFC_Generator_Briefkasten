@@ -35,7 +35,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Titel wurde in die linke Spalte verschoben
+st.title("Parametrischer Briefkasten-Konfigurator")
 
 # --- Konstanten für Standardwerte (aus generate_mailbox_v2) ---
 DEFAULT_BREITE = BASE_WIDTH
@@ -231,12 +231,9 @@ with st.spinner("Aktualisiere Modell..."):
 st.markdown("""
     <style>
     /* Fixiert die linke Spalte (Viewer) */
-    div[data-testid="column"]:nth-of-type(1) {
+    div[data-testid="column"]:nth-of-type(1) > div {
         position: sticky;
-        top: 0rem;
-        align-self: start;
-        max-height: 100vh;
-        overflow-y: auto;
+        top: 2rem;
         z-index: 100;
     }
     /* Sticky Footer für Download-Buttons in der rechten Spalte */
@@ -427,7 +424,6 @@ with col2:
 
 # ---------- LINKS: Viewer ----------
 with col1:
-    st.title("Parametrischer Briefkasten-Konfigurator")
     st.subheader("3D-Ansicht")
 
     with st.expander("🛠️ Viewer-Optionen (Experte)"):
