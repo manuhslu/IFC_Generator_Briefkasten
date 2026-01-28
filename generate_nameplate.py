@@ -172,5 +172,9 @@ def generate_production_packages(text: str):
         return zip_buffer.read()
 
     except Exception as e:
+        if "triangulation" in str(e).lower():
+            print("\n❌ FEHLER: Keine Triangulierungs-Engine gefunden.")
+            print("   Bitte installieren Sie 'mapbox-earcut' mit dem Befehl:")
+            print("   pip install mapbox-earcut\n")
         print(f"An error occurred in generate_production_packages: {e}")
         raise
